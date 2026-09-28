@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Área do Cliente | Charles Borges Advocacia</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<meta name="theme-color" content="#1F2F42">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Public+Sans:wght@400;500;600;700&family=Spectral:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="portal.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="marca" href="./"><img src="emblema.png" alt=""><span><b>CHARLES BORGES</b><small>ÁREA DO CLIENTE</small></span></a>
+    <div class="acoes"><button class="link-topo" id="sair" hidden>Sair</button></div>
+  </div>
+</header>
+<main id="app"><div class="carregando">Carregando...</div></main>
+
+<script type="module">
+import {
+  db, configurado, esc, primeiroNome, NOME_TIPO, dataBR, horaBR, diaNum, mesCurto, semana, dataLonga,
+  linkWhats, WHATS_ESCRITORIO, PORTAL_URL, baixarICS, montarLogin, toast
+} from "./portal-comum.js";
+
+const app = document.getElementById("app");
+const btnSair = document.getElementById("sair");
+const ICON_WHATS = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.8-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.1 5.1 0 0 0 1.1 2.7 11.7 11.7 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z"/></svg>';
+
+let carregado = false;
+
+async function iniciar() {
+  if (!configurado) return montarLogin(app, { titulo: "Área do Cliente", sub: "", destino: PORTAL_URL });
+  const { data: { session } } = await db.auth.getSession();
+  if (session) await carregarPortal(session);
+  else mostrarLogin();
+  db.auth.onAuthStateChange((evento, s) => {
+    if (evento === "SIGNED_IN" && s && !carregado) carregarPortal(s);
+    if (evento === "SIGNED_OUT") { carregado = false; mostrarLogin(); }
+  });
+}
+
+function mostrarLogin() {
+  btnSair.hidden = true;
+  montarLogin(app, {
+    titulo: "Área do Cliente",
+    sub: "Acompanhe seus processos, audiências e perícias. Para entrar, informe o e-mail cadastrado no escritório.",
+    destino: PORTAL_URL,
+  });
+}
+
+btnSair.addEventListener("click", async () => { await db.auth.signOut(); });
+
+async function carregarPortal(session) {
+  carregado = true;
+  btnSair.hidden = false;
+  app.innerHTML = '<div class="carregando">Carregando seus processos...</div>';
+  if (location.hash) history.replaceState(null, "", location.pathname);
+
+  const [cad, procs, evs] = await Promise.all([
+    db.rpc("meu_cadastro"),
+    db.from("processos").select("*").order("criado_em", { ascending: true }),
+    db.from("eventos").select("*").order("data_hora", { ascending: true, nullsFirst: false }),
+  ]);
+  if (cad.error || procs.error || evs.error) {
+    app.innerHTML = `<div class="wrap"><div class="saudacao"><div class="aviso aviso-erro">Não foi possível carregar seus dados agora. Tente novamente em alguns minutos.</div></div></div>`;
+    return;
+  }
+  const cliente = (cad.data || [])[0];
+  if (!cliente) {
+    app.innerHTML = `<div class="wrap"><div class="saudacao">
+      <h1>Acesso sem cadastro vinculado</h1>
+      <p class="mudo" style="margin:10px 0 18px">O e-mail <b>${esc(session.user.email)}</b> não está vinculado a nenhum cliente ativo. Fale com o escritório para conferir o cadastro.</p>
+      <a class="btn btn-whats" target="_blank" rel="noopener" href="${linkWhats(WHATS_ESCRITORIO, "Olá! Tentei acessar a área do cliente com o e-mail " + session.user.email + " e não encontrei meus processos.")}">${ICON_WHATS} Falar pelo WhatsApp</a>
+    </div></div>`;
+    return;
+  }
+  render(cliente, procs.data || [], evs.data || []);
+}
+
+function render(cliente, processos, eventos) {
+  const agora = Date.now();
+  const procPorId = Object.fromEntries(processos.map((p) => [p.id, p]));
+  const futuros = eventos
+    .filter((e) => e.tipo !== "andamento" && e.data_hora && new Date(e.data_hora).getTime() > agora - 2 * 3600e3 && !procPorId[e.processo_id]?.arquivado)
+    .sort((a, b) => new Date(a.data_hora) - new Date(b.data_hora));
+
+  const ativos = processos.filter((p) => !p.arquivado);
+  const arquivados = processos.filter((p) => p.arquivado);
+
+  app.innerHTML = `
+  <div class="wrap">
+    <section class="saudacao">
+      <span class="rotulo">Área do Cliente</span>
+      <h1>Olá, ${esc(primeiroNome(cliente.nome))}.</h1>
+      <p class="mudo">Aqui você acompanha seus processos e os próximos compromissos.</p>
+    </section>
+
+    <section class="secao">
+      <h2>Próximos compromissos</h2>
+      ${futuros.length ? `<div class="compromissos">${futuros.map((e, i) => cardCompromisso(e, procPorId[e.processo_id], i === 0)).join("")}</div>`
+        : `<div class="vazio">Nenhuma audiência, perícia ou reunião marcada no momento. Quando houver, ela aparece aqui e você recebe um aviso por e-mail.</div>`}
+    </section>
+
+    <section class="secao">
+      <h2>${ativos.length === 1 ? "Seu processo" : "Seus processos"}</h2>
+      ${ativos.length ? ativos.map((p) => cardProcesso(p, eventos.filter((e) => e.processo_id === p.id))).join("")
+        : `<div class="vazio">Nenhum processo em andamento cadastrado.</div>`}
+      ${arquivados.length ? `<details style="margin-top:10px"><summary class="mudo" style="cursor:pointer">Processos encerrados (${arquivados.length})</summary><div style="margin-top:12px">${arquivados.map((p) => cardProcesso(p, eventos.filter((e) => e.processo_id === p.id))).join("")}</div></details>` : ""}
+    </section>
+
+    <section class="contato-final">
+      <div><h2>Ficou com alguma dúvida?</h2><p>Fale diretamente com o escritório.</p></div>
+      <a class="btn btn-whats" target="_blank" rel="noopener" href="${linkWhats(WHATS_ESCRITORIO, `Olá! Sou ${cliente.nome} e tenho uma dúvida sobre o meu processo.`)}">${ICON_WHATS} WhatsApp (49) 99821-4100</a>
+    </section>
+  </div>
+  <p class="rodape">Charles dos Santos Borges, OAB/SC 77.242 · As informações desta área são sigilosas e destinadas somente ao cliente.</p>`;
+
+  app.querySelectorAll("[data-ics]").forEach((b) => b.addEventListener("click", () => {
+    const ev = eventos.find((x) => x.id === b.dataset.ics);
+    baixarICS(ev, procPorId[ev.processo_id]?.titulo || "");
+    toast("Arquivo de agenda baixado. Abra-o para salvar no seu calendário.");
+  }));
+  app.querySelectorAll("[data-mais]").forEach((b) => b.addEventListener("click", () => {
+    b.previousElementSibling.querySelectorAll("li[hidden]").forEach((li) => (li.hidden = false));
+    b.remove();
+  }));
+}
+
+function cardCompromisso(e, p, primeiro) {
+  const ehHoje = new Date(e.data_hora).toDateString() === new Date().toDateString();
+  return `
+  <article class="comp ${primeiro ? "proximo" : ""}">
+    <div class="dia"><div class="n">${diaNum(e.data_hora)}</div><div class="m">${esc(mesCurto(e.data_hora))}</div><div class="s">${ehHoje ? "hoje" : esc(semana(e.data_hora))}</div></div>
+    <div>
+      <span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span>
+      <h3>${esc(e.titulo)}</h3>
+      <div class="meta">
+        <span><b>${esc(dataLonga(e.data_hora))}</b>, às <b>${horaBR(e.data_hora)}</b></span>
+        ${e.local ? `<span>Local: ${esc(e.local)}</span>` : ""}
+        <span>Processo: ${esc(p?.titulo || "")}</span>
+      </div>
+      ${e.descricao ? `<p class="desc">${esc(e.descricao)}</p>` : ""}
+      <div class="botoes">
+        ${/^https?:\/\//i.test(e.link || "") ? `<a class="btn btn-primario btn-peq" href="${esc(e.link)}" target="_blank" rel="noopener">Entrar na videochamada</a>` : ""}
+        <button class="btn btn-sec btn-peq" data-ics="${e.id}">Salvar na agenda do celular</button>
+      </div>
+    </div>
+  </article>`;
+}
+
+function cardProcesso(p, evs) {
+  const hist = evs
+    .filter((e) => e.tipo === "andamento" || (e.data_hora && new Date(e.data_hora) <= new Date()))
+    .sort((a, b) => new Date(b.data_hora || b.criado_em) - new Date(a.data_hora || a.criado_em));
+  const LIM = 5;
+  return `
+  <article class="processo">
+    <div class="cab">
+      <h3>${esc(p.titulo)}</h3>
+      ${p.numero ? `<div class="num">Processo nº ${esc(p.numero)}${p.juizo ? " · " + esc(p.juizo) : ""}</div>` : p.juizo ? `<div class="num">${esc(p.juizo)}</div>` : ""}
+      <span class="situacao">${esc(p.situacao)}</span>
+      ${p.resumo ? `<p class="resumo">${esc(p.resumo)}</p>` : ""}
+    </div>
+    ${hist.length ? `<ul class="linha-tempo">${hist.map((e, i) => `
+      <li ${i >= LIM ? "hidden" : ""}>
+        <div class="quando">${dataBR(e.data_hora || e.criado_em)} · ${NOME_TIPO[e.tipo]}</div>
+        <div class="t">${esc(e.titulo)}</div>
+        ${e.descricao ? `<div class="d">${esc(e.descricao)}</div>` : ""}
+      </li>`).join("")}</ul>${hist.length > LIM ? `<button class="mais" data-mais>Ver histórico completo (${hist.length})</button>` : ""}`
+    : `<p class="mudo peq" style="padding:14px 20px">Ainda não há andamentos registrados.</p>`}
+  </article>`;
+}
+
+iniciar();
+</script>
+</body>
+</html>

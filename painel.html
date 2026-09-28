@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Painel do Escritório | Charles Borges Advocacia</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<meta name="theme-color" content="#1F2F42">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Public+Sans:wght@400;500;600;700&family=Spectral:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="portal.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="marca" href="#agenda"><img src="emblema.png" alt=""><span><b>CHARLES BORGES</b><small>PAINEL DO ESCRITÓRIO</small></span></a>
+    <div class="acoes"><span id="quem" class="peq" style="color:#C9CFD8"></span><button class="link-topo" id="sair" hidden>Sair</button></div>
+  </div>
+</header>
+<nav class="abas" id="abas" hidden aria-label="Seções">
+  <div class="wrap" role="tablist">
+    <button class="aba" role="tab" data-rota="agenda">Agenda</button>
+    <button class="aba" role="tab" data-rota="clientes">Clientes</button>
+    <button class="aba" role="tab" data-rota="envios">Avisos enviados</button>
+  </div>
+</nav>
+<main id="app"><div class="carregando">Carregando...</div></main>
+<dialog id="dlg"></dialog>
+
+<script type="module">
+import {
+  db, configurado, esc, primeiroNome, NOME_TIPO, dataBR, horaBR, dataLonga, partesData, isoDeBrasilia, chaveDia,
+  normalizaWhats, mostraWhats, linkWhats, PORTAL_URL, montarLogin, toast
+} from "./portal-comum.js";
+
+const app = document.getElementById("app");
+const dlg = document.getElementById("dlg");
+const abas = document.getElementById("abas");
+const PAINEL_URL = PORTAL_URL.replace("cliente.html", "painel.html");
+const ICON_WHATS = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.8-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.1 5.1 0 0 0 1.1 2.7 11.7 11.7 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z"/></svg>';
+
+const S = { advogado: null, clientes: [], processos: [], cli: {}, proc: {}, iniciado: false };
+
+// ================= início e login =================
+async function iniciar() {
+  if (!configurado) return montarLogin(app, { titulo: "Painel do Escritório", sub: "", destino: PAINEL_URL });
+  const { data: { session } } = await db.auth.getSession();
+  if (session) await entrar(session); else mostrarLogin();
+  db.auth.onAuthStateChange((ev, s) => {
+    if (ev === "SIGNED_IN" && s && !S.iniciado) entrar(s);
+    if (ev === "SIGNED_OUT") location.reload();
+  });
+}
+function mostrarLogin() {
+  montarLogin(app, { titulo: "Painel do Escritório", sub: "Acesso restrito aos advogados do escritório.", destino: PAINEL_URL });
+}
+document.getElementById("sair").addEventListener("click", () => db.auth.signOut());
+
+async function entrar(session) {
+  S.iniciado = true;
+  if (location.hash.includes("access_token")) history.replaceState(null, "", location.pathname + "#agenda");
+  app.innerHTML = '<div class="carregando">Carregando...</div>';
+  const { data: adv } = await db.from("advogados").select("*");
+  const eu = (adv || []).find((a) => a.email.toLowerCase() === session.user.email.toLowerCase());
+  if (!eu) {
+    app.innerHTML = `<div class="login"><div class="cartao"><h1>Acesso restrito</h1><p class="sub" style="margin-top:10px">O e-mail <b>${esc(session.user.email)}</b> não está autorizado a usar o painel.</p><button class="btn btn-sec" id="x">Sair</button></div></div>`;
+    app.querySelector("#x").onclick = () => db.auth.signOut();
+    return;
+  }
+  S.advogado = eu;
+  document.getElementById("quem").textContent = primeiroNome(eu.nome);
+  document.getElementById("sair").hidden = false;
+  abas.hidden = false;
+  await recarregarBase();
+  window.addEventListener("hashchange", rotear);
+  rotear();
+}
+
+async function recarregarBase() {
+  const [c, p] = await Promise.all([
+    db.from("clientes").select("*").order("nome", { ascending: true }),
+    db.from("processos").select("*").order("criado_em", { ascending: true }),
+  ]);
+  if (c.error || p.error) return toast("Erro ao carregar dados: " + (c.error || p.error).message, true);
+  S.clientes = c.data; S.processos = p.data;
+  S.cli = Object.fromEntries(S.clientes.map((x) => [x.id, x]));
+  S.proc = Object.fromEntries(S.processos.map((x) => [x.id, x]));
+}
+
+abas.addEventListener("click", (e) => { const r = e.target.closest("[data-rota]"); if (r) location.hash = r.dataset.rota; });
+
+function rotear() {
+  const [rota, id] = (location.hash.replace("#", "") || "agenda").split("/");
+  const aba = rota === "cliente" ? "clientes" : rota;
+  abas.querySelectorAll(".aba").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.rota === aba)));
+  window.scrollTo(0, 0);
+  if (rota === "clientes") return telaClientes();
+  if (rota === "cliente" && id) return telaCliente(id);
+  if (rota === "envios") return telaEnvios();
+  return telaAgenda();
+}
+
+// ================= mensagens de WhatsApp =================
+function msgEvento(ev) {
+  const p = S.proc[ev.processo_id], c = p && S.cli[p.cliente_id];
+  const nome = primeiroNome(c?.nome);
+  const partes = [`Olá, ${nome}! Aqui é do escritório Charles Borges Advocacia.`];
+  if (ev.tipo === "andamento") {
+    partes.push(`Há uma atualização no seu processo ${p.titulo}: ${ev.titulo}.`);
+  } else {
+    const verbo = ev.tipo === "reuniao" ? "agendada" : ev.tipo === "prazo" ? "registrado" : "marcada";
+    const art = ev.tipo === "prazo" ? "um" : "uma";
+    partes.push(`Foi ${verbo} ${art} ${NOME_TIPO[ev.tipo].toLowerCase()} no seu processo ${p.titulo}: ${ev.titulo}.`);
+    partes.push(`Data: ${dataLonga(ev.data_hora)}, às ${horaBR(ev.data_hora)}.`);
+    if (ev.local) partes.push(`Local: ${ev.local}.`);
+    if (ev.link) partes.push(`Acesso: ${ev.link}`);
+  }
+  if (ev.descricao) partes.push(ev.descricao);
+  partes.push(`Você também pode acompanhar pela área do cliente: ${PORTAL_URL}`);
+  return partes.join("\n\n");
+}
+function msgAcesso(c) {
+  return `Olá, ${primeiroNome(c.nome)}! Aqui é do escritório Charles Borges Advocacia.\n\nAgora você pode acompanhar seus processos, audiências e perícias pela área do cliente:\n${PORTAL_URL}\n\nPara entrar, use o e-mail ${c.email}. Você vai receber um e-mail com o botão de acesso e um código. Não precisa de senha.\n\nQualquer dúvida, estou à disposição.`;
+}
+function botaoWhats(numero, texto, rotulo = "WhatsApp") {
+  if (!numero) return "";
+  return `<a class="btn btn-whats btn-peq" target="_blank" rel="noopener" href="${linkWhats(numero, texto)}">${ICON_WHATS} ${rotulo}</a>`;
+}
+function statusAviso(ev) {
+  if (!ev.visivel_cliente) return `<span class="tag tag-oculto">interno</span>`;
+  if (!ev.notificar) return `<span class="peq mudo">sem aviso por e-mail</span>`;
+  const env = [ev.aviso_enviado_em && "aviso", ev.lembrete_7d_enviado_em && "7 dias", ev.lembrete_1d_enviado_em && "véspera"].filter(Boolean);
+  return env.length ? `<span class="peq mudo">e-mail enviado: ${env.join(", ")}</span>` : `<span class="peq mudo">e-mail programado</span>`;
+}
+
+// ================= AGENDA =================
+async function telaAgenda() {
+  app.innerHTML = '<div class="carregando">Carregando agenda...</div>';
+  const hoje = isoDeBrasilia(partesData(new Date().toISOString()).data, "00:00");
+  const ate = new Date(Date.now() + 90 * 864e5).toISOString();
+  const semanaPassada = new Date(Date.now() - 7 * 864e5).toISOString();
+  const [fut, and] = await Promise.all([
+    db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", hoje).lte("data_hora", ate).order("data_hora", { ascending: true }),
+    db.from("eventos").select("*").eq("tipo", "andamento").gte("criado_em", semanaPassada).order("criado_em", { ascending: false }),
+  ]);
+  if (fut.error || and.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc((fut.error || and.error).message)}</div></div>`);
+
+  const grupos = {};
+  for (const e of fut.data) (grupos[chaveDia(e.data_hora)] ||= []).push(e);
+  const hojeK = partesData(new Date().toISOString()).data;
+  const amanhaK = partesData(new Date(Date.now() + 864e5).toISOString()).data;
+
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <div class="barra">
+      <div><h1>Agenda</h1><p class="mudo peq">Próximos 90 dias, de todos os clientes.</p></div>
+      <button class="btn btn-primario" id="novo-ev">+ Lançar evento</button>
+    </div>
+    ${Object.keys(grupos).length ? Object.entries(grupos).map(([k, evs]) => `
+      <div class="grupo-data">${k === hojeK ? "Hoje · " : k === amanhaK ? "Amanhã · " : ""}${esc(dataLonga(evs[0].data_hora))}</div>
+      <div class="lista">${evs.map(itemEventoAgenda).join("")}</div>`).join("")
+      : `<div class="vazio">Nenhum compromisso nos próximos 90 dias.</div>`}
+    <div class="grupo-data" style="margin-top:18px">Andamentos lançados nos últimos 7 dias</div>
+    ${and.data.length ? `<div class="lista">${and.data.map(itemEventoAgenda).join("")}</div>` : `<div class="vazio">Nenhum andamento lançado nesta semana.</div>`}
+  </div>`;
+  app.querySelector("#novo-ev").onclick = () => dialogoEvento({ escolherProcesso: true });
+  ligarAcoesEvento(app, [...fut.data, ...and.data], telaAgenda);
+}
+function itemEventoAgenda(e) {
+  const p = S.proc[e.processo_id], c = p && S.cli[p.cliente_id];
+  return `<div class="item">
+    <div class="principal">
+      <div>${e.tipo !== "andamento" ? `<span class="hora">${horaBR(e.data_hora)}</span>` : `<span class="peq mudo">${dataBR(e.criado_em)}</span> `}
+        <span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span> <b>${esc(e.titulo)}</b></div>
+      <div class="sec"><a href="#cliente/${c?.id}">${esc(c?.nome || "")}</a> · ${esc(p?.titulo || "")}${e.local ? " · " + esc(e.local) : ""}</div>
+      <div>${statusAviso(e)}</div>
+    </div>
+    <div class="dir">
+      ${e.visivel_cliente ? botaoWhats(c?.whatsapp, msgEvento(e)) : ""}
+      <button class="btn btn-sec btn-peq" data-editar-ev="${e.id}">Editar</button>
+    </div>
+  </div>`;
+}
+function ligarAcoesEvento(raiz, lista, depois) {
+  raiz.querySelectorAll("[data-editar-ev]").forEach((b) => (b.onclick = () => {
+    const ev = lista.find((x) => x.id === b.dataset.editarEv);
+    dialogoEvento({ evento: ev, depois });
+  }));
+}
+
+// ================= CLIENTES =================
+function telaClientes() {
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <div class="barra">
+      <div><h1>Clientes</h1><p class="mudo peq"><span id="total"></span></p></div>
+      <button class="btn btn-primario" id="novo-cli">+ Novo cliente</button>
+    </div>
+    <div class="barra"><input type="search" id="busca" placeholder="Buscar por nome, e-mail, telefone ou nº do processo" aria-label="Buscar"></div>
+    <div class="lista" id="lista"></div>
+  </div>`;
+  const busca = app.querySelector("#busca"), lista = app.querySelector("#lista");
+  const nProc = {};
+  for (const p of S.processos) if (!p.arquivado) nProc[p.cliente_id] = (nProc[p.cliente_id] || 0) + 1;
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+  const desenhar = () => {
+    const q = norm(busca.value.trim());
+    const qd = q.replace(/\D/g, "");
+    const achados = S.clientes.filter((c) => {
+      if (!q) return true;
+      if (norm(c.nome).includes(q) || norm(c.email).includes(q)) return true;
+      if (qd.length >= 4 && (String(c.whatsapp || "").includes(qd))) return true;
+      return S.processos.some((p) => p.cliente_id === c.id && (norm(p.titulo).includes(q) || (qd.length >= 4 && String(p.numero || "").replace(/\D/g, "").includes(qd))));
+    });
+    app.querySelector("#total").textContent = `${S.clientes.filter((c) => c.ativo).length} ativos · ${S.clientes.length} no total`;
+    lista.innerHTML = achados.length ? achados.slice(0, 300).map((c) => `
+      <div class="item clicavel ${c.ativo ? "" : "inativo"}" data-cli="${c.id}">
+        <div class="principal"><b>${esc(c.nome)}</b>${c.ativo ? "" : ' <span class="tag tag-oculto">inativo</span>'}
+          <div class="sec">${c.email ? esc(c.email) : '<span style="color:var(--warn)">sem e-mail: não recebe avisos nem acessa o portal</span>'}${c.whatsapp ? " · " + mostraWhats(c.whatsapp) : ""}</div></div>
+        <div class="dir"><span class="contador">${nProc[c.id] || 0} processo${(nProc[c.id] || 0) === 1 ? "" : "s"}</span></div>
+      </div>`).join("") : `<div class="vazio" style="border:0">Nenhum cliente encontrado.</div>`;
+  };
+  busca.addEventListener("input", desenhar);
+  lista.addEventListener("click", (e) => { const i = e.target.closest("[data-cli]"); if (i) location.hash = "cliente/" + i.dataset.cli; });
+  app.querySelector("#novo-cli").onclick = () => dialogoCliente({});
+  desenhar();
+  busca.focus();
+}
+
+async function telaCliente(id) {
+  const c = S.cli[id];
+  if (!c) { app.innerHTML = `<div class="wrap painel-corpo"><button class="voltar" onclick="location.hash='clientes'">← Clientes</button><div class="vazio">Cliente não encontrado.</div></div>`; return; }
+  app.innerHTML = '<div class="carregando">Carregando...</div>';
+  const procs = S.processos.filter((p) => p.cliente_id === id);
+  let evs = [];
+  if (procs.length) {
+    const r = await db.from("eventos").select("*").in("processo_id", procs.map((p) => p.id)).order("data_hora", { ascending: false, nullsFirst: true });
+    if (r.error) return toast(r.error.message, true);
+    evs = r.data;
+  }
+  const ordenaEv = (a, b) => new Date(b.data_hora || b.criado_em) - new Date(a.data_hora || a.criado_em);
+
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <button class="voltar" id="voltar">← Clientes</button>
+    <div class="ficha">
+      <div class="cartao">
+        <span class="rotulo">Cliente</span>
+        <h2 style="margin:6px 0 12px">${esc(c.nome)}</h2>
+        ${c.ativo ? "" : '<div class="aviso aviso-info">Cliente inativo: não acessa o portal e não recebe avisos.</div>'}
+        <p class="peq"><b>E-mail:</b> ${c.email ? esc(c.email) : '<span style="color:var(--warn)">não informado</span>'}</p>
+        <p class="peq"><b>WhatsApp:</b> ${c.whatsapp ? mostraWhats(c.whatsapp) : "não informado"}</p>
+        ${c.observacoes ? `<p class="peq" style="margin-top:10px;white-space:pre-line"><b>Anotações internas:</b><br>${esc(c.observacoes)}</p>` : ""}
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
+          <button class="btn btn-sec btn-peq" id="editar-cli">Editar dados</button>
+          ${c.email && c.ativo ? botaoWhats(c.whatsapp, msgAcesso(c), "Enviar acesso ao portal") : ""}
+        </div>
+      </div>
+      <div>
+        <div class="barra"><h2>Processos</h2><button class="btn btn-primario btn-peq" id="novo-proc">+ Novo processo</button></div>
+        ${procs.length ? procs.map((p) => {
+          const pe = evs.filter((e) => e.processo_id === p.id).sort(ordenaEv);
+          return `
+          <div class="proc-admin ${p.arquivado ? "inativo" : ""}">
+            <div class="cab">
+              <div><h3>${esc(p.titulo)}${p.arquivado ? ' <span class="tag tag-oculto">encerrado</span>' : ""}</h3>
+                <div class="sec peq mudo">${[p.numero && "nº " + esc(p.numero), p.juizo && esc(p.juizo), p.parte_contraria && "x " + esc(p.parte_contraria)].filter(Boolean).join(" · ") || "sem número"}</div>
+                <span class="situacao">${esc(p.situacao)}</span></div>
+              <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
+                <button class="btn btn-primario btn-peq" data-novo-ev="${p.id}">+ Evento</button>
+                <button class="btn btn-sec btn-peq" data-editar-proc="${p.id}">Editar</button>
+              </div>
+            </div>
+            <div class="evs">${pe.length ? pe.map((e) => `
+              <div class="item">
+                <div class="principal">
+                  <div><span class="peq mudo">${e.data_hora ? dataBR(e.data_hora) + (e.tipo !== "andamento" ? " " + horaBR(e.data_hora) : "") : dataBR(e.criado_em)}</span>
+                  <span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span></div>
+                  <div><b>${esc(e.titulo)}</b></div>
+                  <div>${statusAviso(e)}</div>
+                </div>
+                <div class="dir">${e.visivel_cliente ? botaoWhats(c.whatsapp, msgEvento(e)) : ""}<button class="btn btn-sec btn-peq" data-editar-ev="${e.id}">Editar</button></div>
+              </div>`).join("") : `<p class="peq mudo" style="padding:12px 16px">Nenhum evento lançado.</p>`}</div>
+          </div>`;
+        }).join("") : `<div class="vazio">Nenhum processo cadastrado para este cliente.</div>`}
+      </div>
+    </div>
+  </div>`;
+  const recarregar = () => telaCliente(id);
+  app.querySelector("#voltar").onclick = () => (location.hash = "clientes");
+  app.querySelector("#editar-cli").onclick = () => dialogoCliente(c);
+  app.querySelector("#novo-proc").onclick = () => dialogoProcesso({ cliente_id: id });
+  app.querySelectorAll("[data-editar-proc]").forEach((b) => (b.onclick = () => dialogoProcesso(S.proc[b.dataset.editarProc])));
+  app.querySelectorAll("[data-novo-ev]").forEach((b) => (b.onclick = () => dialogoEvento({ processo_id: b.dataset.novoEv, depois: recarregar })));
+  ligarAcoesEvento(app, evs, recarregar);
+}
+
+// ================= ENVIOS =================
+async function telaEnvios() {
+  app.innerHTML = '<div class="carregando">Carregando...</div>';
+  const r = await db.from("envios").select("*").order("criado_em", { ascending: false }).limit(150);
+  if (r.error) return toast(r.error.message, true);
+  const NOME_AVISO = { novo: "Aviso", lembrete_7d: "Lembrete 7 dias", lembrete_1d: "Lembrete véspera" };
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <h1>Avisos enviados</h1>
+    <p class="mudo peq" style="margin-bottom:16px">Últimos 150 e-mails automáticos. Os avisos saem entre 7h e 20h, verificados a cada 15 minutos.</p>
+    ${r.data.length ? `<div class="lista">${r.data.map((v) => `
+      <div class="item"><div class="principal">
+        <div><span class="peq mudo">${dataBR(v.criado_em)} ${horaBR(v.criado_em)}</span> <b>${esc(S.cli[v.cliente_id]?.nome || v.email)}</b></div>
+        <div class="sec">${NOME_AVISO[v.tipo_aviso] || esc(v.tipo_aviso)} · ${esc(v.email)}${v.status === "erro" ? ` · <span style="color:var(--err)">${esc(v.detalhe || "erro")}</span>` : ""}</div>
+      </div><div class="dir"><span class="tag ${v.status === "enviado" ? "tag-reuniao" : "tag-prazo"}">${v.status === "enviado" ? "enviado" : "falhou"}</span></div></div>`).join("")}</div>`
+      : `<div class="vazio">Nenhum aviso enviado ainda.</div>`}
+  </div>`;
+}
+
+// ================= DIÁLOGOS =================
+function abrir(html, aoEnviar) {
+  dlg.innerHTML = html;
+  const f = dlg.querySelector("form");
+  f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const b = f.querySelector("[type=submit]"); b.disabled = true;
+    try { await aoEnviar(f); } finally { b.disabled = false; }
+  });
+  dlg.querySelectorAll("[data-fechar]").forEach((b) => (b.onclick = () => dlg.close()));
+  dlg.showModal();
+  dlg.querySelector("input,select,textarea")?.focus();
+}
+const val = (f, n) => f.elements[n].value.trim();
+
+function dialogoCliente(c) {
+  const novo = !c.id;
+  abrir(`
+  <form>
+    <h2>${novo ? "Novo cliente" : "Editar cliente"}</h2>
+    <div class="campo"><label for="nome">Nome completo</label><input id="nome" name="nome" type="text" required value="${esc(c.nome)}"></div>
+    <div class="campo"><label for="email">E-mail</label><input id="email" name="email" type="email" value="${esc(c.email)}">
+      <span class="dica">É por ele que o cliente entra no portal e recebe os avisos.</span></div>
+    <div class="campo"><label for="whatsapp">WhatsApp</label><input id="whatsapp" name="whatsapp" type="tel" placeholder="(49) 99999-9999" value="${esc(c.whatsapp ? mostraWhats(c.whatsapp) : "")}"></div>
+    <div class="campo"><label for="obs">Anotações internas</label><textarea id="obs" name="observacoes" placeholder="O cliente nunca vê este campo.">${esc(c.observacoes)}</textarea></div>
+    ${novo ? "" : `<label class="check"><input type="checkbox" name="ativo" ${c.ativo ? "checked" : ""}><span>Cliente ativo (acessa o portal e recebe avisos)</span></label>`}
+    <div class="dlg-botoes">
+      ${novo ? "" : '<button type="button" class="btn btn-perigo btn-peq" id="excluir">Excluir</button>'}
+      <div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div>
+    </div>
+  </form>`, async (f) => {
+    const email = val(f, "email").toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast("Confira o e-mail.", true);
+    const dados = { nome: val(f, "nome"), email: email || null, whatsapp: normalizaWhats(val(f, "whatsapp")) || null, observacoes: val(f, "observacoes") || null };
+    if (!novo) dados.ativo = f.elements.ativo.checked;
+    const r = novo ? await db.from("clientes").insert(dados).select().single()
+                   : await db.from("clientes").update(dados).eq("id", c.id).select().single();
+    if (r.error) return toast(/clientes_email_unico|duplicate/i.test(r.error.message) ? "Já existe um cliente com este e-mail." : r.error.message, true);
+    dlg.close(); toast("Cliente salvo.");
+    await recarregarBase();
+    if (novo) location.hash = "cliente/" + r.data.id; else rotear();
+  });
+  dlg.querySelector("#excluir")?.addEventListener("click", async () => {
+    const n = S.processos.filter((p) => p.cliente_id === c.id).length;
+    if (!confirm(`Excluir ${c.nome}${n ? ` e ${n} processo(s) com todos os eventos` : ""}? Esta ação não pode ser desfeita.\n\nSe quiser apenas bloquear o acesso, desmarque "Cliente ativo".`)) return;
+    const r = await db.from("clientes").delete().eq("id", c.id);
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); toast("Cliente excluído."); await recarregarBase(); location.hash = "clientes";
+  });
+}
+
+function dialogoProcesso(p) {
+  const novo = !p.id;
+  abrir(`
+  <form>
+    <h2>${novo ? "Novo processo" : "Editar processo"}</h2>
+    <div class="campo"><label for="titulo">Título para o cliente</label><input id="titulo" name="titulo" type="text" required placeholder="Ex.: Aposentadoria rural" value="${esc(p.titulo)}"></div>
+    <div class="linha2">
+      <div class="campo"><label for="numero">Número do processo</label><input id="numero" name="numero" type="text" placeholder="0000000-00.0000.0.00.0000" value="${esc(p.numero)}"></div>
+      <div class="campo"><label for="situacao">Situação</label><input id="situacao" name="situacao" type="text" list="situacoes" value="${esc(p.situacao || "Em andamento")}">
+        <datalist id="situacoes"><option>Em andamento</option><option>Aguardando audiência</option><option>Aguardando perícia</option><option>Aguardando sentença</option><option>Em fase de recurso</option><option>Em cumprimento de sentença</option><option>Suspenso</option><option>Encerrado</option></datalist></div>
+    </div>
+    <div class="linha2">
+      <div class="campo"><label for="juizo">Juízo / órgão</label><input id="juizo" name="juizo" type="text" placeholder="Ex.: Vara Única de Anchieta" value="${esc(p.juizo)}"></div>
+      <div class="campo"><label for="parte">Parte contrária</label><input id="parte" name="parte_contraria" type="text" value="${esc(p.parte_contraria)}"></div>
+    </div>
+    <div class="campo"><label for="resumo">Resumo para o cliente</label><textarea id="resumo" name="resumo" placeholder="Explicação em linguagem simples sobre o processo.">${esc(p.resumo)}</textarea></div>
+    ${novo ? "" : `<label class="check"><input type="checkbox" name="arquivado" ${p.arquivado ? "checked" : ""}><span>Processo encerrado (sai da lista principal e para de gerar avisos)</span></label>`}
+    <div class="dlg-botoes">
+      ${novo ? "" : '<button type="button" class="btn btn-perigo btn-peq" id="excluir">Excluir</button>'}
+      <div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div>
+    </div>
+  </form>`, async (f) => {
+    const dados = {
+      titulo: val(f, "titulo"), numero: val(f, "numero") || null, situacao: val(f, "situacao") || "Em andamento",
+      juizo: val(f, "juizo") || null, parte_contraria: val(f, "parte_contraria") || null, resumo: val(f, "resumo") || null,
+    };
+    if (novo) dados.cliente_id = p.cliente_id; else dados.arquivado = f.elements.arquivado.checked;
+    const r = novo ? await db.from("processos").insert(dados).select().single()
+                   : await db.from("processos").update(dados).eq("id", p.id).select().single();
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); toast("Processo salvo."); await recarregarBase(); rotear();
+  });
+  dlg.querySelector("#excluir")?.addEventListener("click", async () => {
+    if (!confirm(`Excluir o processo "${p.titulo}" e todos os seus eventos? Esta ação não pode ser desfeita.`)) return;
+    const r = await db.from("processos").delete().eq("id", p.id);
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); toast("Processo excluído."); await recarregarBase(); rotear();
+  });
+}
+
+function dialogoEvento({ evento, processo_id, escolherProcesso, depois }) {
+  const e = evento || { tipo: "audiencia", visivel_cliente: true, notificar: true, processo_id };
+  const novo = !e.id;
+  const pd = e.data_hora ? partesData(e.data_hora) : { data: "", hora: "" };
+  const opcoesProc = S.processos.filter((p) => !p.arquivado && S.cli[p.cliente_id]?.ativo)
+    .map((p) => ({ id: p.id, rot: `${S.cli[p.cliente_id].nome} · ${p.titulo}${p.numero ? " · " + p.numero : ""}` }))
+    .sort((a, b) => a.rot.localeCompare(b.rot, "pt-BR"));
+  const pAtual = S.proc[e.processo_id];
+
+  abrir(`
+  <form>
+    <h2>${novo ? "Lançar evento" : "Editar evento"}</h2>
+    ${escolherProcesso ? `
+      <div class="campo"><label for="proc">Cliente e processo</label>
+        <input id="proc" name="proc" type="search" list="lista-proc" required placeholder="Digite o nome do cliente ou o nº do processo" autocomplete="off">
+        <datalist id="lista-proc">${opcoesProc.map((o) => `<option value="${esc(o.rot)}"></option>`).join("")}</datalist></div>`
+      : `<p class="peq mudo" style="margin:-8px 0 14px">${esc(S.cli[pAtual?.cliente_id]?.nome || "")} · ${esc(pAtual?.titulo || "")}</p>`}
+    <div class="linha2">
+      <div class="campo"><label for="tipo">Tipo</label>
+        <select id="tipo" name="tipo">${Object.entries(NOME_TIPO).map(([k, v]) => `<option value="${k}" ${e.tipo === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      <div class="campo"><label for="titulo">Título</label><input id="titulo" name="titulo" type="text" required value="${esc(e.titulo)}" placeholder="Ex.: Audiência de instrução"></div>
+    </div>
+    <div class="linha2" id="bloco-data">
+      <div class="campo"><label for="data">Data</label><input id="data" name="data" type="date" value="${pd.data}"></div>
+      <div class="campo"><label for="hora">Horário</label><input id="hora" name="hora" type="time" value="${pd.hora}"></div>
+    </div>
+    <div id="bloco-local">
+      <div class="campo"><label for="local">Local</label><input id="local" name="local" type="text" value="${esc(e.local)}" placeholder="Ex.: Fórum de Anchieta, sala de audiências"></div>
+      <div class="campo"><label for="link">Link de videoconferência</label><input id="link" name="link" type="url" value="${esc(e.link)}" placeholder="https://..."></div>
+    </div>
+    <div class="campo"><label for="descricao">Explicação para o cliente</label>
+      <textarea id="descricao" name="descricao" placeholder="Ex.: Leve documento com foto e a carteira de trabalho. Chegue 30 minutos antes.">${esc(e.descricao)}</textarea>
+      <span class="dica">Escreva em linguagem simples. Aparece no portal${novo ? " e no e-mail de aviso" : ""}.</span></div>
+    <label class="check"><input type="checkbox" name="visivel" ${e.visivel_cliente ? "checked" : ""}><span>Mostrar para o cliente no portal</span></label>
+    <label class="check"><input type="checkbox" name="notificar" ${e.notificar ? "checked" : ""}><span>Avisar o cliente por e-mail <span class="mudo peq">(aviso ao lançar e lembretes 7 dias e 1 dia antes)</span></span></label>
+    <div class="dlg-botoes">
+      ${novo ? "" : '<button type="button" class="btn btn-perigo btn-peq" id="excluir">Excluir</button>'}
+      <div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div>
+    </div>
+  </form>`, async (f) => {
+    let pid = e.processo_id;
+    if (escolherProcesso) {
+      const o = opcoesProc.find((x) => x.rot === f.elements.proc.value);
+      if (!o) return toast("Escolha o cliente e o processo na lista de sugestões.", true);
+      pid = o.id;
+    }
+    const tipo = f.elements.tipo.value;
+    const data = f.elements.data.value, hora = f.elements.hora.value;
+    if (tipo !== "andamento" && !data) return toast("Informe a data.", true);
+    const link = val(f, "link");
+    if (link && !/^https?:\/\//i.test(link)) return toast("O link precisa começar com https://", true);
+    const dados = {
+      processo_id: pid, tipo, titulo: val(f, "titulo"),
+      data_hora: data ? isoDeBrasilia(data, hora || (tipo === "prazo" ? "18:00" : "09:00")) : null,
+      local: tipo === "andamento" ? null : val(f, "local") || null,
+      link: tipo === "andamento" ? null : link || null,
+      descricao: val(f, "descricao") || null,
+      visivel_cliente: f.elements.visivel.checked,
+      notificar: f.elements.visivel.checked && f.elements.notificar.checked,
+    };
+    const r = novo ? await db.from("eventos").insert(dados).select().single()
+                   : await db.from("eventos").update(dados).eq("id", e.id).select().single();
+    if (r.error) return toast(r.error.message, true);
+    dlg.close();
+    toast(dados.notificar && novo ? "Evento salvo. O e-mail ao cliente sai em alguns minutos (entre 7h e 20h)." : "Evento salvo.");
+    (depois || rotear)();
+  });
+
+  const f = dlg.querySelector("form");
+  const ajustar = (mudouTipo) => {
+    const t = f.elements.tipo.value;
+    dlg.querySelector("#bloco-local").hidden = t === "andamento" || t === "prazo";
+    dlg.querySelector('label[for="data"]').textContent = t === "andamento" ? "Data (opcional)" : "Data";
+    if (mudouTipo && novo && t === "prazo") { f.elements.visivel.checked = false; f.elements.notificar.checked = false; }
+    if (mudouTipo && novo && t !== "prazo") { f.elements.visivel.checked = true; f.elements.notificar.checked = true; }
+    f.elements.notificar.disabled = !f.elements.visivel.checked;
+  };
+  f.elements.tipo.addEventListener("change", () => ajustar(true));
+  f.elements.visivel.addEventListener("change", () => ajustar(false));
+  ajustar(false);
+  dlg.querySelector("#excluir")?.addEventListener("click", async () => {
+    if (!confirm(`Excluir "${e.titulo}"?`)) return;
+    const r = await db.from("eventos").delete().eq("id", e.id);
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); toast("Evento excluído."); (depois || rotear)();
+  });
+}
+
+iniciar();
+</script>
+</body>
+</html>
