@@ -171,3 +171,47 @@ dialog h2{margin-bottom:16px}
   .saudacao h1{font-size:1.55rem}
   .marca b{font-size:.84rem}
 }
+
+/* ===== Etapa 2: resumo, ficha, honorários, checklist ===== */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-bottom:22px}
+.card-num{background:#fff;border:1px solid var(--line);border-radius:4px;padding:16px 18px;text-decoration:none;color:inherit;display:block}
+a.card-num:hover{border-color:var(--bronze)}
+.card-num .n{font-family:var(--serif);font-size:2rem;color:var(--navy);font-weight:600;line-height:1.1}
+.card-num .l{font-size:.86rem;color:var(--muted)}
+.card-num.alerta .n{color:var(--err)}
+.card-num.aviso .n{color:var(--warn)}
+.colunas{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.bloco{margin-bottom:22px}
+.bloco>.barra{margin-bottom:10px}
+.bloco h2{font-size:1.15rem}
+dialog.grande{width:min(820px,calc(100% - 24px))}
+fieldset{border:1px solid var(--line);border-radius:4px;padding:14px 16px 4px;margin:0 0 14px}
+legend{font-family:var(--caps);font-size:.72rem;letter-spacing:.16em;color:var(--bronze-ink);font-weight:600;padding:0 6px;text-transform:uppercase}
+.grade{display:grid;grid-template-columns:repeat(6,1fr);gap:0 12px}
+.grade .c2{grid-column:span 2}.grade .c3{grid-column:span 3}.grade .c4{grid-column:span 4}.grade .c6{grid-column:span 6}.grade .c1{grid-column:span 1}
+.tag-incompleta{background:var(--warn-bg);color:var(--warn)}
+.dados-ficha{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:.9rem;margin-top:6px}
+.dados-ficha dt{color:var(--muted)}
+.dados-ficha dd{color:var(--ink);overflow-wrap:anywhere}
+.check-item{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #F0EBE1}
+.check-item:last-child{border-bottom:0}
+.check-item input{width:18px;height:18px;accent-color:var(--ok);flex:none}
+.check-item .txt{flex:1}
+.check-item.ok .txt{color:var(--muted);text-decoration:line-through}
+.x{background:none;border:0;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:0 4px}
+.x:hover{color:var(--err)}
+.parcela{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between;padding:8px 16px;border-top:1px solid #F0EBE1;font-size:.92rem}
+.parcela.vencida .v{color:var(--err);font-weight:600}
+.parcela.paga .v{color:var(--ok)}
+.faltando{background:var(--warn-bg);color:#6B4700;border-radius:3px;padding:10px 12px;font-size:.9rem;margin-bottom:12px}
+.tabela-prev{width:100%;border-collapse:collapse;font-size:.85rem;margin:10px 0}
+.tabela-prev th,.tabela-prev td{border:1px solid var(--line);padding:5px 7px;text-align:left}
+.tabela-prev th{background:var(--ivory)}
+.pendentes{background:#fff;border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:4px;padding:16px 20px}
+.pendentes li{margin:4px 0 4px 18px}
+@media (max-width:760px){
+  .colunas{grid-template-columns:1fr}
+  .grade{grid-template-columns:1fr 1fr}
+  .grade .c1,.grade .c2,.grade .c3{grid-column:span 1}
+  .grade .c4,.grade .c6{grid-column:span 2}
+}

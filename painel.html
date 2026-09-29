@@ -11,18 +11,22 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Public+Sans:wght@400;500;600;700&family=Spectral:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="portal.css">
+<script src="pizzip.min.js"></script>
+<script src="docxtemplater.min.js"></script>
 </head>
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="marca" href="#agenda"><img src="emblema.png" alt=""><span><b>CHARLES BORGES</b><small>PAINEL DO ESCRITÓRIO</small></span></a>
+    <a class="marca" href="#resumo"><img src="emblema.png" alt=""><span><b>CHARLES BORGES</b><small>PAINEL DO ESCRITÓRIO</small></span></a>
     <div class="acoes"><span id="quem" class="peq" style="color:#C9CFD8"></span><button class="link-topo" id="sair" hidden>Sair</button></div>
   </div>
 </header>
 <nav class="abas" id="abas" hidden aria-label="Seções">
   <div class="wrap" role="tablist">
+    <button class="aba" role="tab" data-rota="resumo">Resumo</button>
     <button class="aba" role="tab" data-rota="agenda">Agenda</button>
     <button class="aba" role="tab" data-rota="clientes">Clientes</button>
+    <button class="aba" role="tab" data-rota="honorarios">Honorários</button>
     <button class="aba" role="tab" data-rota="envios">Avisos enviados</button>
   </div>
 </nav>
@@ -34,16 +38,32 @@ import {
   db, configurado, esc, primeiroNome, NOME_TIPO, dataBR, horaBR, dataLonga, partesData, isoDeBrasilia, chaveDia,
   normalizaWhats, mostraWhats, linkWhats, PORTAL_URL, montarLogin, toast
 } from "./portal-comum.js";
+import { MODELOS, ESTADOS_CIVIS, montarDados, gerarDocx, moeda, dividirParcelas } from "./documentos.js";
 
 const app = document.getElementById("app");
 const dlg = document.getElementById("dlg");
 const abas = document.getElementById("abas");
 const PAINEL_URL = PORTAL_URL.replace("cliente.html", "painel.html");
 const ICON_WHATS = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.8-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.1 5.1 0 0 0 1.1 2.7 11.7 11.7 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z"/></svg>';
+const HOJE = () => partesData(new Date().toISOString()).data;
+const somaDias = (d, n) => { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const dBR = (d) => (d ? d.split("-").reverse().join("/") : "");
+const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+
+const CHECKLISTS = {
+  "Previdenciário (incapacidade)": ["RG e CPF", "Comprovante de residência atualizado", "Carteira de trabalho (CTPS)", "Extrato CNIS", "Comunicado de indeferimento ou cessação do INSS", "Laudos, exames e atestados médicos", "Receitas de medicamentos"],
+  "Previdenciário rural (segurado especial)": ["RG e CPF", "Comprovante de residência atualizado", "Notas fiscais de produtor rural", "Inscrição de produtor rural (bloco)", "Certidão de casamento ou de nascimento dos filhos", "Documentos do imóvel rural (matrícula, ITR ou CCIR)", "Autodeclaração do segurado especial", "Comunicado de indeferimento do INSS", "Extrato CNIS"],
+  "Bancário / revisional": ["RG e CPF", "Comprovante de residência atualizado", "Contrato bancário", "Comprovantes de pagamento das parcelas", "Extratos bancários do período", "Comprovante de renda"],
+  "Família": ["RG e CPF", "Comprovante de residência atualizado", "Certidão de casamento ou nascimento", "Certidões de nascimento dos filhos", "Comprovante de renda", "Relação e documentos dos bens"],
+  "Consumidor": ["RG e CPF", "Comprovante de residência atualizado", "Nota fiscal ou contrato", "Comprovantes de pagamento", "Protocolos de atendimento", "Fotos, vídeos ou prints"],
+  "Trabalhista": ["RG e CPF", "Comprovante de residência atualizado", "Carteira de trabalho (CTPS)", "Contracheques", "Termo de rescisão", "Extrato do FGTS", "Nomes e contatos de testemunhas"],
+  "Criminal": ["RG e CPF", "Comprovante de residência atualizado", "Boletim de ocorrência", "Intimações e decisões recebidas", "Comprovante de trabalho"],
+  "Inventário / arrolamento": ["Certidão de óbito", "RG, CPF e certidões dos herdeiros", "Certidão de casamento do falecido", "Matrículas e documentos dos bens", "Certidões negativas (municipal, estadual e federal)", "Extratos bancários do falecido"],
+};
 
 const S = { advogado: null, clientes: [], processos: [], cli: {}, proc: {}, iniciado: false };
 
-// ================= início e login =================
+// ================= início =================
 async function iniciar() {
   if (!configurado) return montarLogin(app, { titulo: "Painel do Escritório", sub: "", destino: PAINEL_URL });
   const { data: { session } } = await db.auth.getSession();
@@ -53,14 +73,12 @@ async function iniciar() {
     if (ev === "SIGNED_OUT") location.reload();
   });
 }
-function mostrarLogin() {
-  montarLogin(app, { titulo: "Painel do Escritório", sub: "Acesso restrito aos advogados do escritório.", destino: PAINEL_URL });
-}
+function mostrarLogin() { montarLogin(app, { titulo: "Painel do Escritório", sub: "Acesso restrito aos advogados do escritório.", destino: PAINEL_URL }); }
 document.getElementById("sair").addEventListener("click", () => db.auth.signOut());
 
 async function entrar(session) {
   S.iniciado = true;
-  if (location.hash.includes("access_token")) history.replaceState(null, "", location.pathname + "#agenda");
+  if (location.hash.includes("access_token")) history.replaceState(null, "", location.pathname + "#resumo");
   app.innerHTML = '<div class="carregando">Carregando...</div>';
   const { data: adv } = await db.from("advogados").select("*");
   const eu = (adv || []).find((a) => a.email.toLowerCase() === session.user.email.toLowerCase());
@@ -92,27 +110,34 @@ async function recarregarBase() {
 abas.addEventListener("click", (e) => { const r = e.target.closest("[data-rota]"); if (r) location.hash = r.dataset.rota; });
 
 function rotear() {
-  const [rota, id] = (location.hash.replace("#", "") || "agenda").split("/");
+  const [rota, id] = (location.hash.replace("#", "") || "resumo").split("/");
   const aba = rota === "cliente" ? "clientes" : rota;
   abas.querySelectorAll(".aba").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.rota === aba)));
   window.scrollTo(0, 0);
+  if (rota === "agenda") return telaAgenda();
   if (rota === "clientes") return telaClientes();
   if (rota === "cliente" && id) return telaCliente(id);
+  if (rota === "honorarios") return telaHonorarios();
   if (rota === "envios") return telaEnvios();
-  return telaAgenda();
+  return telaResumo();
 }
 
-// ================= mensagens de WhatsApp =================
+// ================= auxiliares =================
+function pendenciasFicha(c) {
+  const f = [];
+  if (!c.email) f.push("e-mail");
+  if (c.tipo_pessoa === "pj") { if (!c.cnpj) f.push("CNPJ"); }
+  else { if (!c.cpf) f.push("CPF"); if (!c.estado_civil && !c.rep_nome) f.push("estado civil"); }
+  if (!c.logradouro || !c.cidade || !c.uf) f.push("endereço");
+  return f;
+}
 function msgEvento(ev) {
   const p = S.proc[ev.processo_id], c = p && S.cli[p.cliente_id];
-  const nome = primeiroNome(c?.nome);
-  const partes = [`Olá, ${nome}! Aqui é do escritório Charles Borges Advocacia.`];
-  if (ev.tipo === "andamento") {
-    partes.push(`Há uma atualização no seu processo ${p.titulo}: ${ev.titulo}.`);
-  } else {
+  const partes = [`Olá, ${primeiroNome(c?.nome)}! Aqui é do escritório Charles Borges Advocacia.`];
+  if (ev.tipo === "andamento") partes.push(`Há uma atualização no seu processo ${p.titulo}: ${ev.titulo}.`);
+  else {
     const verbo = ev.tipo === "reuniao" ? "agendada" : ev.tipo === "prazo" ? "registrado" : "marcada";
-    const art = ev.tipo === "prazo" ? "um" : "uma";
-    partes.push(`Foi ${verbo} ${art} ${NOME_TIPO[ev.tipo].toLowerCase()} no seu processo ${p.titulo}: ${ev.titulo}.`);
+    partes.push(`Foi ${verbo} ${ev.tipo === "prazo" ? "um" : "uma"} ${NOME_TIPO[ev.tipo].toLowerCase()} no seu processo ${p.titulo}: ${ev.titulo}.`);
     partes.push(`Data: ${dataLonga(ev.data_hora)}, às ${horaBR(ev.data_hora)}.`);
     if (ev.local) partes.push(`Local: ${ev.local}.`);
     if (ev.link) partes.push(`Acesso: ${ev.link}`);
@@ -124,6 +149,12 @@ function msgEvento(ev) {
 function msgAcesso(c) {
   return `Olá, ${primeiroNome(c.nome)}! Aqui é do escritório Charles Borges Advocacia.\n\nAgora você pode acompanhar seus processos, audiências e perícias pela área do cliente:\n${PORTAL_URL}\n\nPara entrar, use o e-mail ${c.email}. Você vai receber um e-mail com o botão de acesso e um código. Não precisa de senha.\n\nQualquer dúvida, estou à disposição.`;
 }
+function msgDocs(c, itens) {
+  return `Olá, ${primeiroNome(c.nome)}! Aqui é do escritório Charles Borges Advocacia.\n\nPara darmos andamento ao seu caso, precisamos dos seguintes documentos:\n\n${itens.map((i) => "• " + i).join("\n")}\n\nPode mandar foto ou PDF aqui mesmo pelo WhatsApp. Obrigado!`;
+}
+function msgCobranca(c, parc) {
+  return `Olá, ${primeiroNome(c.nome)}! Aqui é do escritório Charles Borges Advocacia.\n\nPassando para lembrar da parcela de honorários no valor de ${moeda(parc.valor)}, com vencimento em ${dBR(parc.vencimento)}.\n\nSe já pagou, por favor desconsidere e nos envie o comprovante. Obrigado!`;
+}
 function botaoWhats(numero, texto, rotulo = "WhatsApp") {
   if (!numero) return "";
   return `<a class="btn btn-whats btn-peq" target="_blank" rel="noopener" href="${linkWhats(numero, texto)}">${ICON_WHATS} ${rotulo}</a>`;
@@ -134,47 +165,14 @@ function statusAviso(ev) {
   const env = [ev.aviso_enviado_em && "aviso", ev.lembrete_7d_enviado_em && "7 dias", ev.lembrete_1d_enviado_em && "véspera"].filter(Boolean);
   return env.length ? `<span class="peq mudo">e-mail enviado: ${env.join(", ")}</span>` : `<span class="peq mudo">e-mail programado</span>`;
 }
-
-// ================= AGENDA =================
-async function telaAgenda() {
-  app.innerHTML = '<div class="carregando">Carregando agenda...</div>';
-  const hoje = isoDeBrasilia(partesData(new Date().toISOString()).data, "00:00");
-  const ate = new Date(Date.now() + 90 * 864e5).toISOString();
-  const semanaPassada = new Date(Date.now() - 7 * 864e5).toISOString();
-  const [fut, and] = await Promise.all([
-    db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", hoje).lte("data_hora", ate).order("data_hora", { ascending: true }),
-    db.from("eventos").select("*").eq("tipo", "andamento").gte("criado_em", semanaPassada).order("criado_em", { ascending: false }),
-  ]);
-  if (fut.error || and.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc((fut.error || and.error).message)}</div></div>`);
-
-  const grupos = {};
-  for (const e of fut.data) (grupos[chaveDia(e.data_hora)] ||= []).push(e);
-  const hojeK = partesData(new Date().toISOString()).data;
-  const amanhaK = partesData(new Date(Date.now() + 864e5).toISOString()).data;
-
-  app.innerHTML = `
-  <div class="wrap painel-corpo">
-    <div class="barra">
-      <div><h1>Agenda</h1><p class="mudo peq">Próximos 90 dias, de todos os clientes.</p></div>
-      <button class="btn btn-primario" id="novo-ev">+ Lançar evento</button>
-    </div>
-    ${Object.keys(grupos).length ? Object.entries(grupos).map(([k, evs]) => `
-      <div class="grupo-data">${k === hojeK ? "Hoje · " : k === amanhaK ? "Amanhã · " : ""}${esc(dataLonga(evs[0].data_hora))}</div>
-      <div class="lista">${evs.map(itemEventoAgenda).join("")}</div>`).join("")
-      : `<div class="vazio">Nenhum compromisso nos próximos 90 dias.</div>`}
-    <div class="grupo-data" style="margin-top:18px">Andamentos lançados nos últimos 7 dias</div>
-    ${and.data.length ? `<div class="lista">${and.data.map(itemEventoAgenda).join("")}</div>` : `<div class="vazio">Nenhum andamento lançado nesta semana.</div>`}
-  </div>`;
-  app.querySelector("#novo-ev").onclick = () => dialogoEvento({ escolherProcesso: true });
-  ligarAcoesEvento(app, [...fut.data, ...and.data], telaAgenda);
-}
-function itemEventoAgenda(e) {
+function itemEvento(e, comCliente = true) {
   const p = S.proc[e.processo_id], c = p && S.cli[p.cliente_id];
   return `<div class="item">
     <div class="principal">
-      <div>${e.tipo !== "andamento" ? `<span class="hora">${horaBR(e.data_hora)}</span>` : `<span class="peq mudo">${dataBR(e.criado_em)}</span> `}
-        <span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span> <b>${esc(e.titulo)}</b></div>
-      <div class="sec"><a href="#cliente/${c?.id}">${esc(c?.nome || "")}</a> · ${esc(p?.titulo || "")}${e.local ? " · " + esc(e.local) : ""}</div>
+      <div>${e.tipo !== "andamento" ? `<span class="hora">${dataBR(e.data_hora).slice(0, 5)} ${horaBR(e.data_hora)}</span>` : `<span class="peq mudo">${dataBR(e.criado_em)}</span> `}
+        <span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span></div>
+      <div><b>${esc(e.titulo)}</b></div>
+      ${comCliente ? `<div class="sec"><a href="#cliente/${c?.id}">${esc(c?.nome || "")}</a> · ${esc(p?.titulo || "")}${e.local ? " · " + esc(e.local) : ""}</div>` : ""}
       <div>${statusAviso(e)}</div>
     </div>
     <div class="dir">
@@ -183,119 +181,367 @@ function itemEventoAgenda(e) {
     </div>
   </div>`;
 }
-function ligarAcoesEvento(raiz, lista, depois) {
-  raiz.querySelectorAll("[data-editar-ev]").forEach((b) => (b.onclick = () => {
-    const ev = lista.find((x) => x.id === b.dataset.editarEv);
-    dialogoEvento({ evento: ev, depois });
-  }));
+function ligarEventos(raiz, lista, depois) {
+  raiz.querySelectorAll("[data-editar-ev]").forEach((b) => (b.onclick = () => dialogoEvento({ evento: lista.find((x) => x.id === b.dataset.editarEv), depois })));
+}
+
+// ================= RESUMO =================
+function saudacao() { const h = Number(new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", hourCycle: "h23" }).format(new Date())); return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"; }
+async function telaResumo() {
+  app.innerHTML = '<div class="carregando">Carregando resumo...</div>';
+  const hoje = HOJE();
+  const iniHoje = isoDeBrasilia(hoje, "00:00");
+  const fim7 = isoDeBrasilia(somaDias(hoje, 7), "23:59");
+  const [ev, hon, par, docs] = await Promise.all([
+    db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", iniHoje).lte("data_hora", fim7).order("data_hora", { ascending: true }),
+    db.from("honorarios").select("*"),
+    db.from("parcelas").select("*").order("vencimento", { ascending: true }),
+    db.from("documentos").select("*"),
+  ]);
+  const erro = ev.error || hon.error || par.error || docs.error;
+  if (erro) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc(erro.message)}</div></div>`);
+  const honPor = Object.fromEntries(hon.data.map((h) => [h.id, h]));
+  const abertas = par.data.filter((p) => !p.pago_em);
+  const vencidas = abertas.filter((p) => p.vencimento < hoje);
+  const proximas = abertas.filter((p) => p.vencimento >= hoje && p.vencimento <= somaDias(hoje, 15));
+  const soma = (l) => l.reduce((s, p) => s + Number(p.valor), 0);
+  const ativos = S.clientes.filter((c) => c.ativo);
+  const incompletas = ativos.filter((c) => pendenciasFicha(c).length);
+  const semEmail = ativos.filter((c) => !c.email);
+  const docsPend = {};
+  docs.data.filter((d) => !d.entregue).forEach((d) => (docsPend[d.cliente_id] = (docsPend[d.cliente_id] || 0) + 1));
+  const prazos = ev.data.filter((e) => e.tipo === "prazo");
+  const compromissos = ev.data.filter((e) => e.tipo !== "prazo");
+  const iniMes = hoje.slice(0, 8) + "01";
+  const recebidoMes = soma(par.data.filter((p) => p.pago_em && p.pago_em >= iniMes && p.pago_em <= hoje));
+
+  const linhaParcela = (p) => {
+    const h = honPor[p.honorario_id], c = h && S.cli[h.cliente_id];
+    return `<div class="item"><div class="principal"><div><b>${moeda(p.valor)}</b> <span class="peq ${p.vencimento < hoje ? "" : "mudo"}" style="${p.vencimento < hoje ? "color:var(--err)" : ""}">vence ${dBR(p.vencimento)}</span></div>
+      <div class="sec"><a href="#cliente/${c?.id}">${esc(c?.nome || "")}</a> · ${esc(h?.descricao || "")}</div></div>
+      <div class="dir">${botaoWhats(c?.whatsapp, msgCobranca(c || {}, p), "Cobrar")}<button class="btn btn-sec btn-peq" data-pagar="${p.id}">Marcar pago</button></div></div>`;
+  };
+
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <div class="barra"><div><h1>${saudacao()}, ${esc(primeiroNome(S.advogado.nome))}.</h1><p class="mudo peq">${esc(dataLonga(new Date().toISOString()))}</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="r-cli">+ Novo cliente</button><button class="btn btn-primario" id="r-ev">+ Lançar evento</button></div></div>
+    <div class="cards">
+      <a class="card-num" href="#agenda"><div class="n">${compromissos.length}</div><div class="l">audiências, perícias e reuniões em 7 dias</div></a>
+      <a class="card-num ${prazos.length ? "aviso" : ""}" href="#agenda"><div class="n">${prazos.length}</div><div class="l">prazos nos próximos 7 dias</div></a>
+      <a class="card-num ${vencidas.length ? "alerta" : ""}" href="#honorarios"><div class="n">${moeda(soma(vencidas))}</div><div class="l">honorários vencidos (${vencidas.length} parcela${vencidas.length === 1 ? "" : "s"})</div></a>
+      <a class="card-num" href="#honorarios"><div class="n">${moeda(recebidoMes)}</div><div class="l">recebido neste mês</div></a>
+      <a class="card-num ${incompletas.length ? "aviso" : ""}" href="#clientes" data-filtro="incompletas"><div class="n">${incompletas.length}</div><div class="l">fichas incompletas</div></a>
+      <a class="card-num" href="#clientes" data-filtro="sem-email"><div class="n">${semEmail.length}</div><div class="l">clientes sem e-mail (não recebem avisos)</div></a>
+      <a class="card-num" href="#clientes" data-filtro="docs"><div class="n">${Object.keys(docsPend).length}</div><div class="l">clientes com documentos pendentes</div></a>
+      <a class="card-num" href="#clientes"><div class="n">${ativos.length}</div><div class="l">clientes ativos</div></a>
+    </div>
+    <div class="colunas">
+      <div>
+        <div class="bloco"><h2 style="margin-bottom:10px">Próximos 7 dias</h2>
+          ${ev.data.length ? `<div class="lista">${ev.data.map((e) => itemEvento(e)).join("")}</div>` : `<div class="vazio">Nada marcado para os próximos 7 dias.</div>`}</div>
+      </div>
+      <div>
+        <div class="bloco"><h2 style="margin-bottom:10px">Honorários a receber</h2>
+          ${vencidas.length || proximas.length ? `<div class="lista">${[...vencidas, ...proximas].slice(0, 15).map(linhaParcela).join("")}</div>` : `<div class="vazio">Nenhuma parcela vencida ou a vencer em 15 dias.</div>`}</div>
+        ${incompletas.length ? `<div class="bloco"><h2 style="margin-bottom:10px">Fichas para completar</h2><div class="lista">${incompletas.slice(0, 8).map((c) => `
+          <div class="item clicavel" data-cli="${c.id}"><div class="principal"><b>${esc(c.nome)}</b><div class="sec">falta: ${pendenciasFicha(c).join(", ")}</div></div></div>`).join("")}</div></div>` : ""}
+      </div>
+    </div>
+  </div>`;
+  app.querySelector("#r-ev").onclick = () => dialogoEvento({ escolherProcesso: true, depois: telaResumo });
+  app.querySelector("#r-cli").onclick = () => dialogoFicha({});
+  app.querySelectorAll("[data-filtro]").forEach((a) => a.addEventListener("click", () => (S.filtroClientes = a.dataset.filtro)));
+  app.querySelectorAll("[data-cli]").forEach((i) => (i.onclick = () => (location.hash = "cliente/" + i.dataset.cli)));
+  app.querySelectorAll("[data-pagar]").forEach((b) => (b.onclick = async () => { await marcarPago(b.dataset.pagar); telaResumo(); }));
+  ligarEventos(app, ev.data, telaResumo);
+}
+
+async function marcarPago(id) {
+  const r = await db.from("parcelas").update({ pago_em: HOJE() }).eq("id", id);
+  if (r.error) toast(r.error.message, true); else toast("Parcela marcada como paga.");
+}
+
+// ================= AGENDA =================
+async function telaAgenda() {
+  app.innerHTML = '<div class="carregando">Carregando agenda...</div>';
+  const hoje = isoDeBrasilia(HOJE(), "00:00");
+  const ate = new Date(Date.now() + 90 * 864e5).toISOString();
+  const semanaPassada = new Date(Date.now() - 7 * 864e5).toISOString();
+  const [fut, and] = await Promise.all([
+    db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", hoje).lte("data_hora", ate).order("data_hora", { ascending: true }),
+    db.from("eventos").select("*").eq("tipo", "andamento").gte("criado_em", semanaPassada).order("criado_em", { ascending: false }),
+  ]);
+  if (fut.error || and.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc((fut.error || and.error).message)}</div></div>`);
+  const grupos = {};
+  for (const e of fut.data) (grupos[chaveDia(e.data_hora)] ||= []).push(e);
+  const hojeK = HOJE(), amanhaK = somaDias(hojeK, 1);
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <div class="barra"><div><h1>Agenda</h1><p class="mudo peq">Próximos 90 dias, de todos os clientes.</p></div>
+      <button class="btn btn-primario" id="novo-ev">+ Lançar evento</button></div>
+    ${Object.keys(grupos).length ? Object.entries(grupos).map(([k, evs]) => `
+      <div class="grupo-data">${k === hojeK ? "Hoje · " : k === amanhaK ? "Amanhã · " : ""}${esc(dataLonga(evs[0].data_hora))}</div>
+      <div class="lista">${evs.map((e) => itemEvento(e)).join("")}</div>`).join("") : `<div class="vazio">Nenhum compromisso nos próximos 90 dias.</div>`}
+    <div class="grupo-data" style="margin-top:18px">Andamentos lançados nos últimos 7 dias</div>
+    ${and.data.length ? `<div class="lista">${and.data.map((e) => itemEvento(e)).join("")}</div>` : `<div class="vazio">Nenhum andamento lançado nesta semana.</div>`}
+  </div>`;
+  app.querySelector("#novo-ev").onclick = () => dialogoEvento({ escolherProcesso: true, depois: telaAgenda });
+  ligarEventos(app, [...fut.data, ...and.data], telaAgenda);
 }
 
 // ================= CLIENTES =================
-function telaClientes() {
+async function telaClientes() {
+  const filtro = S.filtroClientes || ""; S.filtroClientes = "";
+  let pend = {};
+  if (filtro === "docs") {
+    const r = await db.from("documentos").select("*").eq("entregue", false);
+    (r.data || []).forEach((d) => (pend[d.cliente_id] = 1));
+  }
   app.innerHTML = `
   <div class="wrap painel-corpo">
     <div class="barra">
       <div><h1>Clientes</h1><p class="mudo peq"><span id="total"></span></p></div>
-      <button class="btn btn-primario" id="novo-cli">+ Novo cliente</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="importar">Importar planilha</button><button class="btn btn-primario" id="novo-cli">+ Novo cliente</button></div>
     </div>
-    <div class="barra"><input type="search" id="busca" placeholder="Buscar por nome, e-mail, telefone ou nº do processo" aria-label="Buscar"></div>
+    <div class="barra">
+      <input type="search" id="busca" placeholder="Buscar por nome, CPF, e-mail, telefone ou nº do processo" aria-label="Buscar">
+      <select id="filtro" style="max-width:260px" aria-label="Filtro">
+        <option value="">Todos os clientes</option><option value="ativos">Somente ativos</option><option value="incompletas">Fichas incompletas</option>
+        <option value="sem-email">Sem e-mail</option><option value="docs">Com documentos pendentes</option><option value="inativos">Inativos</option>
+      </select>
+    </div>
     <div class="lista" id="lista"></div>
   </div>`;
-  const busca = app.querySelector("#busca"), lista = app.querySelector("#lista");
+  const busca = app.querySelector("#busca"), lista = app.querySelector("#lista"), sel = app.querySelector("#filtro");
+  sel.value = filtro;
   const nProc = {};
   for (const p of S.processos) if (!p.arquivado) nProc[p.cliente_id] = (nProc[p.cliente_id] || 0) + 1;
-  const norm = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-
-  const desenhar = () => {
-    const q = norm(busca.value.trim());
-    const qd = q.replace(/\D/g, "");
+  const desenhar = async () => {
+    if (sel.value === "docs" && !Object.keys(pend).length) {
+      const r = await db.from("documentos").select("*").eq("entregue", false);
+      (r.data || []).forEach((d) => (pend[d.cliente_id] = 1));
+    }
+    const q = norm(busca.value), qd = q.replace(/\D/g, "");
     const achados = S.clientes.filter((c) => {
+      const f = sel.value;
+      if (f === "ativos" && !c.ativo) return false;
+      if (f === "inativos" && c.ativo) return false;
+      if (f === "incompletas" && !(c.ativo && pendenciasFicha(c).length)) return false;
+      if (f === "sem-email" && (c.email || !c.ativo)) return false;
+      if (f === "docs" && !pend[c.id]) return false;
       if (!q) return true;
       if (norm(c.nome).includes(q) || norm(c.email).includes(q)) return true;
-      if (qd.length >= 4 && (String(c.whatsapp || "").includes(qd))) return true;
+      if (qd.length >= 4 && [c.whatsapp, c.cpf, c.cnpj].some((x) => String(x || "").replace(/\D/g, "").includes(qd))) return true;
       return S.processos.some((p) => p.cliente_id === c.id && (norm(p.titulo).includes(q) || (qd.length >= 4 && String(p.numero || "").replace(/\D/g, "").includes(qd))));
     });
-    app.querySelector("#total").textContent = `${S.clientes.filter((c) => c.ativo).length} ativos · ${S.clientes.length} no total`;
-    lista.innerHTML = achados.length ? achados.slice(0, 300).map((c) => `
-      <div class="item clicavel ${c.ativo ? "" : "inativo"}" data-cli="${c.id}">
-        <div class="principal"><b>${esc(c.nome)}</b>${c.ativo ? "" : ' <span class="tag tag-oculto">inativo</span>'}
-          <div class="sec">${c.email ? esc(c.email) : '<span style="color:var(--warn)">sem e-mail: não recebe avisos nem acessa o portal</span>'}${c.whatsapp ? " · " + mostraWhats(c.whatsapp) : ""}</div></div>
+    app.querySelector("#total").textContent = `${S.clientes.filter((c) => c.ativo).length} ativos · ${S.clientes.length} no total · ${achados.length} na lista`;
+    lista.innerHTML = achados.length ? achados.slice(0, 400).map((c) => {
+      const pf = pendenciasFicha(c);
+      return `<div class="item clicavel ${c.ativo ? "" : "inativo"}" data-cli="${c.id}">
+        <div class="principal"><b>${esc(c.nome)}</b>${c.ativo ? "" : ' <span class="tag tag-oculto">inativo</span>'}${pf.length && c.ativo ? ' <span class="tag tag-incompleta">ficha incompleta</span>' : ""}
+          <div class="sec">${c.cpf ? "CPF " + esc(c.cpf) + " · " : c.cnpj ? "CNPJ " + esc(c.cnpj) + " · " : ""}${c.email ? esc(c.email) : '<span style="color:var(--warn)">sem e-mail</span>'}${c.whatsapp ? " · " + mostraWhats(c.whatsapp) : ""}${c.cidade ? " · " + esc(c.cidade) : ""}</div></div>
         <div class="dir"><span class="contador">${nProc[c.id] || 0} processo${(nProc[c.id] || 0) === 1 ? "" : "s"}</span></div>
-      </div>`).join("") : `<div class="vazio" style="border:0">Nenhum cliente encontrado.</div>`;
+      </div>`;
+    }).join("") : `<div class="vazio" style="border:0">Nenhum cliente encontrado.</div>`;
   };
   busca.addEventListener("input", desenhar);
+  sel.addEventListener("change", desenhar);
   lista.addEventListener("click", (e) => { const i = e.target.closest("[data-cli]"); if (i) location.hash = "cliente/" + i.dataset.cli; });
-  app.querySelector("#novo-cli").onclick = () => dialogoCliente({});
+  app.querySelector("#novo-cli").onclick = () => dialogoFicha({});
+  app.querySelector("#importar").onclick = dialogoImportar;
   desenhar();
   busca.focus();
 }
 
+// ================= FICHA DO CLIENTE =================
 async function telaCliente(id) {
   const c = S.cli[id];
   if (!c) { app.innerHTML = `<div class="wrap painel-corpo"><button class="voltar" onclick="location.hash='clientes'">← Clientes</button><div class="vazio">Cliente não encontrado.</div></div>`; return; }
   app.innerHTML = '<div class="carregando">Carregando...</div>';
   const procs = S.processos.filter((p) => p.cliente_id === id);
-  let evs = [];
-  if (procs.length) {
-    const r = await db.from("eventos").select("*").in("processo_id", procs.map((p) => p.id)).order("data_hora", { ascending: false, nullsFirst: true });
-    if (r.error) return toast(r.error.message, true);
-    evs = r.data;
+  const [evR, honR, docR] = await Promise.all([
+    procs.length ? db.from("eventos").select("*").in("processo_id", procs.map((p) => p.id)).order("data_hora", { ascending: false, nullsFirst: true }) : Promise.resolve({ data: [] }),
+    db.from("honorarios").select("*").eq("cliente_id", id).order("criado_em", { ascending: true }),
+    db.from("documentos").select("*").eq("cliente_id", id).order("ordem", { ascending: true }),
+  ]);
+  const erro = evR.error || honR.error || docR.error;
+  if (erro) return toast(erro.message, true);
+  const evs = evR.data, hons = honR.data, docs = docR.data;
+  let parcs = [];
+  if (hons.length) {
+    const r = await db.from("parcelas").select("*").in("honorario_id", hons.map((h) => h.id)).order("vencimento", { ascending: true });
+    parcs = r.data || [];
   }
+  const hoje = HOJE();
   const ordenaEv = (a, b) => new Date(b.data_hora || b.criado_em) - new Date(a.data_hora || a.criado_em);
+  const pf = pendenciasFicha(c);
+  const pendentes = docs.filter((d) => !d.entregue);
+  const ec = c.estado_civil && ESTADOS_CIVIS[c.estado_civil] ? ESTADOS_CIVIS[c.estado_civil][c.sexo === "f" ? 1 : 0] : "";
+  const end = [c.logradouro, c.numero && (/^s\/?n$/i.test(c.numero) ? "S/N" : "nº " + c.numero), c.complemento, c.bairro, c.cidade && c.cidade + (c.uf ? "/" + c.uf : ""), c.cep && "CEP " + c.cep].filter(Boolean).join(", ");
+  const campo = (rot, val) => (val ? `<dt>${rot}</dt><dd>${esc(val)}</dd>` : "");
+  const MOD_HON = { fixo: "Valor fixo", exito: "Êxito", misto: "Fixo + êxito", previdenciario: "Previdenciário" };
 
   app.innerHTML = `
   <div class="wrap painel-corpo">
     <button class="voltar" id="voltar">← Clientes</button>
     <div class="ficha">
-      <div class="cartao">
-        <span class="rotulo">Cliente</span>
-        <h2 style="margin:6px 0 12px">${esc(c.nome)}</h2>
-        ${c.ativo ? "" : '<div class="aviso aviso-info">Cliente inativo: não acessa o portal e não recebe avisos.</div>'}
-        <p class="peq"><b>E-mail:</b> ${c.email ? esc(c.email) : '<span style="color:var(--warn)">não informado</span>'}</p>
-        <p class="peq"><b>WhatsApp:</b> ${c.whatsapp ? mostraWhats(c.whatsapp) : "não informado"}</p>
-        ${c.observacoes ? `<p class="peq" style="margin-top:10px;white-space:pre-line"><b>Anotações internas:</b><br>${esc(c.observacoes)}</p>` : ""}
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
-          <button class="btn btn-sec btn-peq" id="editar-cli">Editar dados</button>
-          ${c.email && c.ativo ? botaoWhats(c.whatsapp, msgAcesso(c), "Enviar acesso ao portal") : ""}
+      <div>
+        <div class="cartao">
+          <span class="rotulo">${c.tipo_pessoa === "pj" ? "Cliente pessoa jurídica" : "Cliente"}</span>
+          <h2 style="margin:6px 0 8px">${esc(c.nome)}</h2>
+          ${c.ativo ? "" : '<div class="aviso aviso-info">Cliente inativo: não acessa o portal e não recebe avisos.</div>'}
+          ${pf.length ? `<div class="faltando">Ficha incompleta: falta ${pf.join(", ")}.</div>` : ""}
+          <dl class="dados-ficha">
+            ${campo("CPF", c.cpf)}${campo("CNPJ", c.cnpj)}${campo("RG", c.rg && c.rg + (c.rg_orgao ? " " + c.rg_orgao : ""))}
+            ${campo("Nascimento", c.nascimento && dBR(c.nascimento))}${campo("Estado civil", ec)}${campo("Profissão", c.profissao)}
+            ${campo("E-mail", c.email)}${campo("WhatsApp", c.whatsapp && mostraWhats(c.whatsapp))}${campo("Telefone", c.telefone2)}
+            ${campo("Endereço", end)}${campo("NIT/PIS", c.nit)}${campo("NB", c.nb)}
+            ${campo("Representante", c.rep_nome && c.rep_nome + (c.rep_qualidade ? " (" + c.rep_qualidade + ")" : ""))}
+          </dl>
+          ${c.observacoes ? `<p class="peq" style="margin-top:10px;white-space:pre-line"><b>Anotações internas:</b><br>${esc(c.observacoes)}</p>` : ""}
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:16px">
+            <button class="btn btn-primario btn-peq" id="gerar-doc">Gerar documento</button>
+            <button class="btn btn-sec btn-peq" id="editar-cli">Editar ficha</button>
+            ${c.email && c.ativo ? botaoWhats(c.whatsapp, msgAcesso(c), "Enviar acesso ao portal") : ""}
+          </div>
+        </div>
+
+        <div class="bloco" style="margin-top:20px">
+          <div class="barra"><h2>Documentos do cliente</h2>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sec btn-peq" id="aplicar-check">Lista padrão</button><button class="btn btn-sec btn-peq" id="novo-doc">+ Item</button></div></div>
+          ${docs.length ? `<div class="lista">${docs.map((d) => `
+            <div class="check-item ${d.entregue ? "ok" : ""}"><input type="checkbox" data-doc="${d.id}" ${d.entregue ? "checked" : ""} aria-label="Entregue">
+              <span class="txt">${esc(d.item)}${d.entregue && d.entregue_em ? ` <span class="peq mudo">(${dBR(d.entregue_em)})</span>` : ""}${d.visivel_cliente ? "" : ' <span class="tag tag-oculto">interno</span>'}</span>
+              <button class="x" data-del-doc="${d.id}" title="Remover" aria-label="Remover">×</button></div>`).join("")}</div>
+            ${pendentes.length ? `<div style="margin-top:8px">${botaoWhats(c.whatsapp, msgDocs(c, pendentes.map((d) => d.item)), `Pedir ${pendentes.length} documento${pendentes.length === 1 ? "" : "s"} pelo WhatsApp`)}</div>` : ""}`
+          : `<div class="vazio">Nenhum documento na lista. Use "Lista padrão" para carregar os documentos conforme o tipo de ação.</div>`}
         </div>
       </div>
+
       <div>
-        <div class="barra"><h2>Processos</h2><button class="btn btn-primario btn-peq" id="novo-proc">+ Novo processo</button></div>
-        ${procs.length ? procs.map((p) => {
-          const pe = evs.filter((e) => e.processo_id === p.id).sort(ordenaEv);
-          return `
-          <div class="proc-admin ${p.arquivado ? "inativo" : ""}">
-            <div class="cab">
-              <div><h3>${esc(p.titulo)}${p.arquivado ? ' <span class="tag tag-oculto">encerrado</span>' : ""}</h3>
-                <div class="sec peq mudo">${[p.numero && "nº " + esc(p.numero), p.juizo && esc(p.juizo), p.parte_contraria && "x " + esc(p.parte_contraria)].filter(Boolean).join(" · ") || "sem número"}</div>
-                <span class="situacao">${esc(p.situacao)}</span></div>
-              <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
-                <button class="btn btn-primario btn-peq" data-novo-ev="${p.id}">+ Evento</button>
-                <button class="btn btn-sec btn-peq" data-editar-proc="${p.id}">Editar</button>
-              </div>
-            </div>
-            <div class="evs">${pe.length ? pe.map((e) => `
-              <div class="item">
-                <div class="principal">
-                  <div><span class="peq mudo">${e.data_hora ? dataBR(e.data_hora) + (e.tipo !== "andamento" ? " " + horaBR(e.data_hora) : "") : dataBR(e.criado_em)}</span>
-                  <span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span></div>
-                  <div><b>${esc(e.titulo)}</b></div>
-                  <div>${statusAviso(e)}</div>
+        <div class="bloco">
+          <div class="barra"><h2>Processos</h2><button class="btn btn-primario btn-peq" id="novo-proc">+ Novo processo</button></div>
+          ${procs.length ? procs.map((p) => {
+            const pe = evs.filter((e) => e.processo_id === p.id).sort(ordenaEv);
+            return `
+            <div class="proc-admin ${p.arquivado ? "inativo" : ""}">
+              <div class="cab">
+                <div><h3>${esc(p.titulo)}${p.arquivado ? ' <span class="tag tag-oculto">encerrado</span>' : ""}</h3>
+                  <div class="sec peq mudo">${[p.numero && "nº " + esc(p.numero), p.juizo && esc(p.juizo), p.parte_contraria && "x " + esc(p.parte_contraria)].filter(Boolean).join(" · ") || "sem número"}</div>
+                  <span class="situacao">${esc(p.situacao)}</span></div>
+                <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
+                  <button class="btn btn-primario btn-peq" data-novo-ev="${p.id}">+ Evento</button>
+                  <button class="btn btn-sec btn-peq" data-editar-proc="${p.id}">Editar</button>
                 </div>
-                <div class="dir">${e.visivel_cliente ? botaoWhats(c.whatsapp, msgEvento(e)) : ""}<button class="btn btn-sec btn-peq" data-editar-ev="${e.id}">Editar</button></div>
-              </div>`).join("") : `<p class="peq mudo" style="padding:12px 16px">Nenhum evento lançado.</p>`}</div>
-          </div>`;
-        }).join("") : `<div class="vazio">Nenhum processo cadastrado para este cliente.</div>`}
+              </div>
+              <div class="evs">${pe.length ? pe.map((e) => itemEvento(e, false)).join("") : `<p class="peq mudo" style="padding:12px 16px">Nenhum evento lançado.</p>`}</div>
+            </div>`;
+          }).join("") : `<div class="vazio">Nenhum processo cadastrado para este cliente.</div>`}
+        </div>
+
+        <div class="bloco">
+          <div class="barra"><h2>Honorários</h2><button class="btn btn-sec btn-peq" id="novo-hon">+ Registrar honorários</button></div>
+          ${hons.length ? hons.map((h) => {
+            const ps = parcs.filter((p) => p.honorario_id === h.id);
+            const pago = ps.filter((p) => p.pago_em).reduce((s, p) => s + Number(p.valor), 0);
+            const total = ps.reduce((s, p) => s + Number(p.valor), 0);
+            return `<div class="proc-admin ${h.encerrado ? "inativo" : ""}">
+              <div class="cab"><div><h3>${esc(h.descricao)}</h3>
+                <div class="sec peq mudo">${MOD_HON[h.modalidade]}${h.valor_fixo ? " · " + moeda(h.valor_fixo) : ""}${h.percentual ? " · " + String(h.percentual).replace(".", ",") + "% do proveito" : ""}${h.processo_id && S.proc[h.processo_id] ? " · " + esc(S.proc[h.processo_id].titulo) : ""}</div>
+                ${ps.length ? `<div class="peq" style="margin-top:4px">Pago ${moeda(pago)} de ${moeda(total)}</div>` : ""}</div>
+                <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start"><button class="btn btn-sec btn-peq" data-add-parc="${h.id}">+ Parcela</button><button class="btn btn-sec btn-peq" data-editar-hon="${h.id}">Editar</button></div></div>
+              ${ps.map((p) => `<div class="parcela ${p.pago_em ? "paga" : p.vencimento < hoje ? "vencida" : ""}">
+                <span>${dBR(p.vencimento)} · <b>${moeda(p.valor)}</b></span>
+                <span class="v">${p.pago_em ? "pago em " + dBR(p.pago_em) : p.vencimento < hoje ? "vencida" : "em aberto"}</span>
+                <span style="display:flex;gap:6px">${p.pago_em ? `<button class="btn btn-sec btn-peq" data-despagar="${p.id}">Desfazer</button>` : `${botaoWhats(c.whatsapp, msgCobranca(c, p), "Cobrar")}<button class="btn btn-sec btn-peq" data-pagar="${p.id}">Pago</button>`}<button class="x" data-del-parc="${p.id}" title="Excluir parcela" aria-label="Excluir parcela">×</button></span>
+              </div>`).join("")}
+              ${h.observacoes ? `<p class="peq mudo" style="padding:8px 16px;white-space:pre-line">${esc(h.observacoes)}</p>` : ""}
+            </div>`;
+          }).join("") : `<div class="vazio">Nenhum honorário registrado. Ao gerar um contrato, você pode registrar os honorários automaticamente.</div>`}
+        </div>
       </div>
     </div>
   </div>`;
+
   const recarregar = () => telaCliente(id);
   app.querySelector("#voltar").onclick = () => (location.hash = "clientes");
-  app.querySelector("#editar-cli").onclick = () => dialogoCliente(c);
+  app.querySelector("#editar-cli").onclick = () => dialogoFicha(c);
+  app.querySelector("#gerar-doc").onclick = () => dialogoDocumento(c, recarregar);
   app.querySelector("#novo-proc").onclick = () => dialogoProcesso({ cliente_id: id });
+  app.querySelector("#novo-hon").onclick = () => dialogoHonorario({ cliente_id: id }, recarregar);
+  app.querySelector("#aplicar-check").onclick = () => dialogoChecklist(c, docs, recarregar);
+  app.querySelector("#novo-doc").onclick = async () => {
+    const item = prompt("Documento a solicitar:");
+    if (!item || !item.trim()) return;
+    const r = await db.from("documentos").insert({ cliente_id: id, item: item.trim(), ordem: docs.length });
+    if (r.error) return toast(r.error.message, true);
+    recarregar();
+  };
+  app.querySelectorAll("[data-doc]").forEach((cb) => (cb.onchange = async () => {
+    const r = await db.from("documentos").update({ entregue: cb.checked, entregue_em: cb.checked ? hoje : null }).eq("id", cb.dataset.doc);
+    if (r.error) toast(r.error.message, true); recarregar();
+  }));
+  app.querySelectorAll("[data-del-doc]").forEach((b) => (b.onclick = async () => {
+    const r = await db.from("documentos").delete().eq("id", b.dataset.delDoc); if (r.error) toast(r.error.message, true); recarregar();
+  }));
   app.querySelectorAll("[data-editar-proc]").forEach((b) => (b.onclick = () => dialogoProcesso(S.proc[b.dataset.editarProc])));
   app.querySelectorAll("[data-novo-ev]").forEach((b) => (b.onclick = () => dialogoEvento({ processo_id: b.dataset.novoEv, depois: recarregar })));
-  ligarAcoesEvento(app, evs, recarregar);
+  app.querySelectorAll("[data-editar-hon]").forEach((b) => (b.onclick = () => dialogoHonorario(hons.find((h) => h.id === b.dataset.editarHon), recarregar)));
+  app.querySelectorAll("[data-add-parc]").forEach((b) => (b.onclick = () => dialogoParcela(b.dataset.addParc, recarregar)));
+  app.querySelectorAll("[data-pagar]").forEach((b) => (b.onclick = async () => { await marcarPago(b.dataset.pagar); recarregar(); }));
+  app.querySelectorAll("[data-despagar]").forEach((b) => (b.onclick = async () => { await db.from("parcelas").update({ pago_em: null }).eq("id", b.dataset.despagar); recarregar(); }));
+  app.querySelectorAll("[data-del-parc]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Excluir esta parcela?")) return;
+    const r = await db.from("parcelas").delete().eq("id", b.dataset.delParc); if (r.error) toast(r.error.message, true); recarregar();
+  }));
+  ligarEventos(app, evs, recarregar);
+}
+
+// ================= HONORÁRIOS (visão geral) =================
+async function telaHonorarios() {
+  app.innerHTML = '<div class="carregando">Carregando...</div>';
+  const [hon, par] = await Promise.all([db.from("honorarios").select("*"), db.from("parcelas").select("*").order("vencimento", { ascending: true })]);
+  if (hon.error || par.error) return toast((hon.error || par.error).message, true);
+  const hoje = HOJE(), honPor = Object.fromEntries(hon.data.map((h) => [h.id, h]));
+  const abertas = par.data.filter((p) => !p.pago_em);
+  const vencidas = abertas.filter((p) => p.vencimento < hoje);
+  const aVencer = abertas.filter((p) => p.vencimento >= hoje);
+  const iniMes = hoje.slice(0, 8) + "01";
+  const pagasMes = par.data.filter((p) => p.pago_em && p.pago_em >= iniMes).sort((a, b) => (a.pago_em < b.pago_em ? 1 : -1));
+  const soma = (l) => l.reduce((s, p) => s + Number(p.valor), 0);
+  const exito = hon.data.filter((h) => !h.encerrado && (h.modalidade === "previdenciario" || h.modalidade === "exito" || h.modalidade === "misto") && h.percentual);
+  const linha = (p, acao = true) => {
+    const h = honPor[p.honorario_id], c = h && S.cli[h.cliente_id];
+    return `<div class="item"><div class="principal"><div><b>${moeda(p.valor)}</b> <span class="peq" style="${!p.pago_em && p.vencimento < hoje ? "color:var(--err)" : "color:var(--muted)"}">${p.pago_em ? "pago em " + dBR(p.pago_em) : "vence " + dBR(p.vencimento)}</span></div>
+      <div class="sec"><a href="#cliente/${c?.id}">${esc(c?.nome || "")}</a> · ${esc(h?.descricao || "")}</div></div>
+      ${acao ? `<div class="dir">${botaoWhats(c?.whatsapp, msgCobranca(c || {}, p), "Cobrar")}<button class="btn btn-sec btn-peq" data-pagar="${p.id}">Marcar pago</button></div>` : ""}</div>`;
+  };
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <h1 style="margin-bottom:14px">Honorários</h1>
+    <div class="cards">
+      <div class="card-num ${vencidas.length ? "alerta" : ""}"><div class="n">${moeda(soma(vencidas))}</div><div class="l">vencidos (${vencidas.length})</div></div>
+      <div class="card-num"><div class="n">${moeda(soma(aVencer))}</div><div class="l">a vencer (${aVencer.length})</div></div>
+      <div class="card-num"><div class="n">${moeda(soma(pagasMes))}</div><div class="l">recebido neste mês</div></div>
+      <div class="card-num"><div class="n">${exito.length}</div><div class="l">contratos de êxito em andamento</div></div>
+    </div>
+    <div class="colunas">
+      <div>
+        <div class="bloco"><h2 style="margin-bottom:10px">Vencidos</h2>${vencidas.length ? `<div class="lista">${vencidas.map((p) => linha(p)).join("")}</div>` : `<div class="vazio">Nenhuma parcela vencida.</div>`}</div>
+        <div class="bloco"><h2 style="margin-bottom:10px">A vencer</h2>${aVencer.length ? `<div class="lista">${aVencer.slice(0, 60).map((p) => linha(p)).join("")}</div>` : `<div class="vazio">Nenhuma parcela a vencer.</div>`}</div>
+      </div>
+      <div>
+        <div class="bloco"><h2 style="margin-bottom:10px">Recebidos neste mês</h2>${pagasMes.length ? `<div class="lista">${pagasMes.map((p) => linha(p, false)).join("")}</div>` : `<div class="vazio">Nenhum recebimento registrado neste mês.</div>`}</div>
+        <div class="bloco"><h2 style="margin-bottom:10px">Contratos de êxito em andamento</h2>${exito.length ? `<div class="lista">${exito.map((h) => {
+          const c = S.cli[h.cliente_id];
+          return `<div class="item clicavel" data-cli="${c?.id}"><div class="principal"><b>${esc(c?.nome || "")}</b><div class="sec">${esc(h.descricao)} · ${String(h.percentual).replace(".", ",")}%</div></div></div>`;
+        }).join("")}</div>` : `<div class="vazio">Nenhum contrato de êxito registrado.</div>`}</div>
+      </div>
+    </div>
+  </div>`;
+  app.querySelectorAll("[data-pagar]").forEach((b) => (b.onclick = async () => { await marcarPago(b.dataset.pagar); telaHonorarios(); }));
+  app.querySelectorAll("[data-cli]").forEach((i) => (i.onclick = () => (location.hash = "cliente/" + i.dataset.cli)));
 }
 
 // ================= ENVIOS =================
@@ -318,7 +564,8 @@ async function telaEnvios() {
 }
 
 // ================= DIÁLOGOS =================
-function abrir(html, aoEnviar) {
+function abrir(html, aoEnviar, grande = false) {
+  dlg.className = grande ? "grande" : "";
   dlg.innerHTML = html;
   const f = dlg.querySelector("form");
   f.addEventListener("submit", async (e) => {
@@ -328,44 +575,305 @@ function abrir(html, aoEnviar) {
   });
   dlg.querySelectorAll("[data-fechar]").forEach((b) => (b.onclick = () => dlg.close()));
   dlg.showModal();
-  dlg.querySelector("input,select,textarea")?.focus();
+  dlg.querySelector("input:not([type=hidden]),select,textarea")?.focus();
 }
-const val = (f, n) => f.elements[n].value.trim();
+const val = (f, n) => (f.elements[n] ? String(f.elements[n].value || "").trim() : "");
+const inp = (nome, rot, v, extra = "", cls = "c3") =>
+  `<div class="campo ${cls}"><label for="f-${nome}">${rot}</label><input id="f-${nome}" name="${nome}" type="text" value="${esc(v)}" ${extra}></div>`;
+const selEC = (nome, v) => `<select id="f-${nome}" name="${nome}"><option value="">Não informado</option>${Object.entries(ESTADOS_CIVIS).map(([k, t]) => `<option value="${k}" ${v === k ? "selected" : ""}>${t[0].replace(/o$/, "o(a)").replace("em união estável", "União estável")}</option>`).join("")}</select>`;
+const SEXO = (nome, v) => `<select id="f-${nome}" name="${nome}"><option value="m" ${v !== "f" ? "selected" : ""}>Masculino</option><option value="f" ${v === "f" ? "selected" : ""}>Feminino</option></select>`;
+const UFS = "AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO".split(" ");
 
-function dialogoCliente(c) {
+function mascaraCPF(v) { const d = String(v || "").replace(/\D/g, ""); return d.length === 11 ? d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4") : String(v || "").trim(); }
+function mascaraCNPJ(v) { const d = String(v || "").replace(/\D/g, ""); return d.length === 14 ? d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : String(v || "").trim(); }
+function mascaraCEP(v) { const d = String(v || "").replace(/\D/g, ""); return d.length === 8 ? d.replace(/(\d{5})(\d{3})/, "$1-$2") : String(v || "").trim(); }
+function cpfValido(v) {
+  const d = String(v || "").replace(/\D/g, "");
+  if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
+  const calc = (n) => { let s = 0; for (let i = 0; i < n; i++) s += +d[i] * (n + 1 - i); const r = (s * 10) % 11; return r === 10 ? 0 : r; };
+  return calc(9) === +d[9] && calc(10) === +d[10];
+}
+
+function dialogoFicha(c) {
   const novo = !c.id;
+  const pj = c.tipo_pessoa === "pj";
   abrir(`
-  <form>
-    <h2>${novo ? "Novo cliente" : "Editar cliente"}</h2>
-    <div class="campo"><label for="nome">Nome completo</label><input id="nome" name="nome" type="text" required value="${esc(c.nome)}"></div>
-    <div class="campo"><label for="email">E-mail</label><input id="email" name="email" type="email" value="${esc(c.email)}">
-      <span class="dica">É por ele que o cliente entra no portal e recebe os avisos.</span></div>
-    <div class="campo"><label for="whatsapp">WhatsApp</label><input id="whatsapp" name="whatsapp" type="tel" placeholder="(49) 99999-9999" value="${esc(c.whatsapp ? mostraWhats(c.whatsapp) : "")}"></div>
-    <div class="campo"><label for="obs">Anotações internas</label><textarea id="obs" name="observacoes" placeholder="O cliente nunca vê este campo.">${esc(c.observacoes)}</textarea></div>
-    ${novo ? "" : `<label class="check"><input type="checkbox" name="ativo" ${c.ativo ? "checked" : ""}><span>Cliente ativo (acessa o portal e recebe avisos)</span></label>`}
+  <form novalidate>
+    <h2>${novo ? "Novo cliente" : "Ficha do cliente"}</h2>
+    <fieldset><legend>Identificação</legend><div class="grade">
+      <div class="campo c2"><label for="f-tipo_pessoa">Tipo</label><select id="f-tipo_pessoa" name="tipo_pessoa"><option value="pf" ${!pj ? "selected" : ""}>Pessoa física</option><option value="pj" ${pj ? "selected" : ""}>Pessoa jurídica</option></select></div>
+      <div class="campo c4"><label for="f-nome" id="rot-nome">${pj ? "Razão social" : "Nome completo"}</label><input id="f-nome" name="nome" type="text" required value="${esc(c.nome)}"></div>
+      <div class="so-pf campo c2"><label for="f-cpf">CPF</label><input id="f-cpf" name="cpf" type="text" inputmode="numeric" value="${esc(c.cpf)}"></div>
+      <div class="so-pj campo c2"><label for="f-cnpj">CNPJ</label><input id="f-cnpj" name="cnpj" type="text" inputmode="numeric" value="${esc(c.cnpj)}"></div>
+      <div class="so-pf campo c2"><label for="f-rg">RG</label><input id="f-rg" name="rg" type="text" value="${esc(c.rg)}"></div>
+      <div class="so-pf campo c2"><label for="f-rg_orgao">Órgão expedidor</label><input id="f-rg_orgao" name="rg_orgao" type="text" placeholder="IGP/SC" value="${esc(c.rg_orgao)}"></div>
+      <div class="so-pf campo c2"><label for="f-sexo">Sexo</label>${SEXO("sexo", c.sexo)}</div>
+      <div class="so-pf campo c2"><label for="f-nascimento">Nascimento</label><input id="f-nascimento" name="nascimento" type="date" value="${esc(c.nascimento)}"></div>
+      <div class="so-pf campo c2"><label for="f-estado_civil">Estado civil</label>${selEC("estado_civil", c.estado_civil)}</div>
+      <div class="so-pf campo c2"><label for="f-nacionalidade">Nacionalidade</label><input id="f-nacionalidade" name="nacionalidade" type="text" value="${esc(c.nacionalidade || "brasileira")}"></div>
+      <div class="so-pf campo c2"><label for="f-profissao">Profissão</label><input id="f-profissao" name="profissao" type="text" placeholder="agricultor" value="${esc(c.profissao)}"></div>
+      <div class="so-pf campo c2"><label for="f-naturalidade">Naturalidade</label><input id="f-naturalidade" name="naturalidade" type="text" placeholder="Anchieta/SC" value="${esc(c.naturalidade)}"></div>
+      <div class="so-pf campo c3"><label for="f-mae">Nome da mãe</label><input id="f-mae" name="mae" type="text" value="${esc(c.mae)}"></div>
+      <div class="so-pf campo c3"><label for="f-pai">Nome do pai</label><input id="f-pai" name="pai" type="text" value="${esc(c.pai)}"></div>
+    </div></fieldset>
+    <fieldset><legend>Contato</legend><div class="grade">
+      <div class="campo c6"><label for="f-email">E-mail</label><input id="f-email" name="email" type="email" value="${esc(c.email)}"><span class="dica">É por ele que o cliente entra no portal e recebe os avisos.</span></div>
+      <div class="campo c3"><label for="f-whatsapp">WhatsApp</label><input id="f-whatsapp" name="whatsapp" type="tel" placeholder="(49) 99999-9999" value="${esc(c.whatsapp ? mostraWhats(c.whatsapp) : "")}"></div>
+      <div class="campo c3"><label for="f-telefone2">Outro telefone</label><input id="f-telefone2" name="telefone2" type="tel" value="${esc(c.telefone2)}"></div>
+    </div></fieldset>
+    <fieldset><legend>Endereço</legend><div class="grade">
+      <div class="campo c2"><label for="f-cep">CEP</label><input id="f-cep" name="cep" type="text" inputmode="numeric" placeholder="89970-000" value="${esc(c.cep)}"></div>
+      <div class="campo c4"><label for="f-logradouro">Logradouro</label><input id="f-logradouro" name="logradouro" type="text" placeholder="Linha João Café Filho" value="${esc(c.logradouro)}"></div>
+      <div class="campo c1"><label for="f-numero">Nº</label><input id="f-numero" name="numero" type="text" placeholder="S/N" value="${esc(c.numero)}"></div>
+      <div class="campo c2"><label for="f-complemento">Complemento</label><input id="f-complemento" name="complemento" type="text" value="${esc(c.complemento)}"></div>
+      <div class="campo c3"><label for="f-bairro">Bairro / localidade</label><input id="f-bairro" name="bairro" type="text" placeholder="Interior" value="${esc(c.bairro)}"></div>
+      <div class="campo c4"><label for="f-cidade">Cidade</label><input id="f-cidade" name="cidade" type="text" value="${esc(c.cidade)}"></div>
+      <div class="campo c2"><label for="f-uf">UF</label><select id="f-uf" name="uf"><option value=""></option>${UFS.map((u) => `<option ${(c.uf || (novo ? "SC" : "")) === u ? "selected" : ""}>${u}</option>`).join("")}</select></div>
+    </div></fieldset>
+    <fieldset class="so-pf"><legend>Previdenciário</legend><div class="grade">
+      ${inp("nit", "NIT / PIS", c.nit)}${inp("nb", "Nº do benefício (NB)", c.nb)}
+    </div></fieldset>
+    <fieldset><legend id="leg-rep">${pj ? "Sócio / representante legal" : "Representante legal (menor, incapaz)"}</legend><div class="grade">
+      ${inp("rep_nome", "Nome", c.rep_nome, "", "c4")}
+      <div class="campo c2"><label for="f-rep_qualidade">Qualidade</label><input id="f-rep_qualidade" name="rep_qualidade" type="text" list="quals" placeholder="${pj ? "sócio administrador" : "genitora"}" value="${esc(c.rep_qualidade)}">
+        <datalist id="quals"><option>genitora</option><option>genitor</option><option>curadora</option><option>curador</option><option>tutora</option><option>tutor</option><option>sócio administrador</option><option>sócia administradora</option></datalist></div>
+      <div class="campo c2"><label for="f-rep_sexo">Sexo</label>${SEXO("rep_sexo", c.rep_sexo)}</div>
+      <div class="campo c2"><label for="f-rep_estado_civil">Estado civil</label>${selEC("rep_estado_civil", c.rep_estado_civil)}</div>
+      ${inp("rep_profissao", "Profissão", c.rep_profissao, "", "c2")}
+      ${inp("rep_cpf", "CPF", c.rep_cpf, 'inputmode="numeric"', "c2")}${inp("rep_rg", "RG", c.rep_rg, "", "c2")}${inp("rep_rg_orgao", "Órgão", c.rep_rg_orgao, "", "c2")}
+    </div></fieldset>
+    <fieldset><legend>Interno</legend>
+      <div class="campo"><label for="f-obs">Anotações internas</label><textarea id="f-obs" name="observacoes" placeholder="O cliente nunca vê este campo.">${esc(c.observacoes)}</textarea></div>
+      ${novo ? "" : `<label class="check"><input type="checkbox" name="ativo" ${c.ativo ? "checked" : ""}><span>Cliente ativo (acessa o portal e recebe avisos)</span></label>`}
+    </fieldset>
     <div class="dlg-botoes">
       ${novo ? "" : '<button type="button" class="btn btn-perigo btn-peq" id="excluir">Excluir</button>'}
       <div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div>
     </div>
   </form>`, async (f) => {
     const email = val(f, "email").toLowerCase();
+    if (!val(f, "nome")) return toast("Informe o nome.", true);
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast("Confira o e-mail.", true);
-    const dados = { nome: val(f, "nome"), email: email || null, whatsapp: normalizaWhats(val(f, "whatsapp")) || null, observacoes: val(f, "observacoes") || null };
+    const tipo = f.elements.tipo_pessoa.value;
+    const cpf = mascaraCPF(val(f, "cpf"));
+    if (tipo === "pf" && cpf && !cpfValido(cpf) && !confirm("O CPF digitado parece inválido. Salvar mesmo assim?")) return;
+    const campos = ["nome", "rg", "rg_orgao", "nacionalidade", "profissao", "naturalidade", "mae", "pai", "logradouro", "numero", "complemento", "bairro", "cidade", "telefone2", "nit", "nb", "rep_nome", "rep_qualidade", "rep_profissao", "rep_rg", "rep_rg_orgao", "observacoes"];
+    const dados = Object.fromEntries(campos.map((k) => [k, val(f, k) || null]));
+    Object.assign(dados, {
+      tipo_pessoa: tipo, email: email || null, whatsapp: normalizaWhats(val(f, "whatsapp")) || null,
+      cpf: tipo === "pf" ? cpf || null : null, cnpj: tipo === "pj" ? mascaraCNPJ(val(f, "cnpj")) || null : null,
+      sexo: tipo === "pf" ? f.elements.sexo.value : null, nascimento: tipo === "pf" ? val(f, "nascimento") || null : null,
+      estado_civil: tipo === "pf" ? f.elements.estado_civil.value || null : null,
+      cep: mascaraCEP(val(f, "cep")) || null, uf: f.elements.uf.value || null,
+      rep_sexo: f.elements.rep_sexo.value, rep_estado_civil: f.elements.rep_estado_civil.value || null,
+      rep_cpf: mascaraCPF(val(f, "rep_cpf")) || null,
+    });
     if (!novo) dados.ativo = f.elements.ativo.checked;
-    const r = novo ? await db.from("clientes").insert(dados).select().single()
-                   : await db.from("clientes").update(dados).eq("id", c.id).select().single();
-    if (r.error) return toast(/clientes_email_unico|duplicate/i.test(r.error.message) ? "Já existe um cliente com este e-mail." : r.error.message, true);
-    dlg.close(); toast("Cliente salvo.");
+    const r = novo ? await db.from("clientes").insert(dados).select().single() : await db.from("clientes").update(dados).eq("id", c.id).select().single();
+    if (r.error) return toast(/clientes_email_unico/i.test(r.error.message) ? "Já existe um cliente com este e-mail." : /clientes_cpf_unico/i.test(r.error.message) ? "Já existe um cliente com este CPF." : r.error.message, true);
+    dlg.close(); toast("Ficha salva.");
     await recarregarBase();
     if (novo) location.hash = "cliente/" + r.data.id; else rotear();
+  }, true);
+
+  const f = dlg.querySelector("form");
+  const alternar = () => {
+    const pjSel = f.elements.tipo_pessoa.value === "pj";
+    dlg.querySelectorAll(".so-pf").forEach((x) => (x.hidden = pjSel));
+    dlg.querySelectorAll(".so-pj").forEach((x) => (x.hidden = !pjSel));
+    dlg.querySelector("#rot-nome").textContent = pjSel ? "Razão social" : "Nome completo";
+    dlg.querySelector("#leg-rep").textContent = pjSel ? "Sócio / representante legal" : "Representante legal (menor, incapaz)";
+  };
+  f.elements.tipo_pessoa.addEventListener("change", alternar); alternar();
+  // Busca de endereço pelo CEP (ViaCEP)
+  f.elements.cep.addEventListener("blur", async () => {
+    const d = f.elements.cep.value.replace(/\D/g, "");
+    if (d.length !== 8) return;
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${d}/json/`); const j = await r.json();
+      if (j.erro) return;
+      if (!f.elements.logradouro.value && j.logradouro) f.elements.logradouro.value = j.logradouro;
+      if (!f.elements.bairro.value && j.bairro) f.elements.bairro.value = j.bairro;
+      if (j.localidade) f.elements.cidade.value = j.localidade;
+      if (j.uf) f.elements.uf.value = j.uf;
+      f.elements.cep.value = mascaraCEP(d);
+    } catch { /* sem internet ou CEP inexistente: segue manual */ }
   });
   dlg.querySelector("#excluir")?.addEventListener("click", async () => {
     const n = S.processos.filter((p) => p.cliente_id === c.id).length;
-    if (!confirm(`Excluir ${c.nome}${n ? ` e ${n} processo(s) com todos os eventos` : ""}? Esta ação não pode ser desfeita.\n\nSe quiser apenas bloquear o acesso, desmarque "Cliente ativo".`)) return;
+    if (!confirm(`Excluir ${c.nome}${n ? ` e ${n} processo(s) com todos os eventos, honorários e documentos` : ""}? Esta ação não pode ser desfeita.\n\nSe quiser apenas bloquear o acesso, desmarque "Cliente ativo".`)) return;
     const r = await db.from("clientes").delete().eq("id", c.id);
     if (r.error) return toast(r.error.message, true);
     dlg.close(); toast("Cliente excluído."); await recarregarBase(); location.hash = "clientes";
   });
+}
+
+function dialogoDocumento(c, depois) {
+  const procs = S.processos.filter((p) => p.cliente_id === c.id && !p.arquivado);
+  const hoje = HOJE();
+  abrir(`
+  <form novalidate>
+    <h2>Gerar documento</h2>
+    <p class="peq mudo" style="margin:-8px 0 14px">${esc(c.nome)}</p>
+    <div class="linha2">
+      <div class="campo"><label for="d-modelo">Documento</label><select id="d-modelo" name="modelo">${Object.entries(MODELOS).map(([k, m]) => `<option value="${k}">${m.nome}</option>`).join("")}</select></div>
+      <div class="campo" id="b-adv"><label for="d-adv">Advogados</label><select id="d-adv" name="advogados"><option value="ambos">Charles e Elmo</option><option value="charles">Só Charles</option><option value="elmo">Só Elmo</option></select></div>
+    </div>
+    ${procs.length ? `<div class="campo"><label for="d-proc">Processo (opcional, preenche o objeto)</label><select id="d-proc" name="processo"><option value="">Nenhum</option>${procs.map((p) => `<option value="${p.id}">${esc(p.titulo)}${p.numero ? " · " + esc(p.numero) : ""}</option>`).join("")}</select></div>` : ""}
+    <div class="campo" id="b-fin"><label for="d-fin">Finalidade da procuração</label><input id="d-fin" name="finalidade" type="text" value="PROPOR AÇÃO CÍVEL" list="finalidades">
+      <datalist id="finalidades"><option>PROPOR AÇÃO CÍVEL</option><option>PROPOR AÇÃO PREVIDENCIÁRIA EM FACE DO INSS</option><option>REQUERIMENTO ADMINISTRATIVO JUNTO AO INSS</option><option>PROPOR AÇÃO REVISIONAL DE CONTRATO BANCÁRIO</option><option>DEFESA EM AÇÃO CÍVEL</option><option>OPOR EMBARGOS À EXECUÇÃO</option><option>PROPOR AÇÃO DE DIVÓRCIO</option><option>PROPOR AÇÃO DE ALIMENTOS</option><option>INVENTÁRIO E PARTILHA DE BENS</option><option>RECLAMATÓRIA TRABALHISTA</option><option>DEFESA CRIMINAL</option></datalist></div>
+    <div class="campo" id="b-obj"><label for="d-obj">Objeto do contrato</label><textarea id="d-obj" name="objeto" style="min-height:70px" placeholder="ajuizamento e acompanhamento de ação previdenciária em face do INSS visando à concessão de aposentadoria por incapacidade permanente"></textarea></div>
+    <div class="linha2">
+      <div class="campo" id="b-perc"><label for="d-perc">Percentual (%)</label><input id="d-perc" name="percentual" type="text" inputmode="decimal" value="30"></div>
+      <div class="campo" id="b-valor"><label for="d-valor">Valor fixo (R$)</label><input id="d-valor" name="valor_fixo" type="text" inputmode="decimal" placeholder="3.000,00"></div>
+    </div>
+    <div class="linha2" id="b-parc">
+      <div class="campo"><label for="d-np">Nº de parcelas</label><input id="d-np" name="parcelas" type="number" min="1" max="60" value="1"></div>
+      <div class="campo"><label for="d-venc">1º vencimento</label><input id="d-venc" name="primeiro_vencimento" type="date" value=""><span class="dica">Em branco: à vista, na assinatura.</span></div>
+    </div>
+    <label class="check" id="b-hipo"><input type="checkbox" name="hipossuficiencia" checked><span>Incluir declaração de hipossuficiência na procuração</span></label>
+    <label class="check" id="b-reg"><input type="checkbox" name="registrar" checked><span>Registrar estes honorários no controle financeiro</span></label>
+    <div class="linha2">
+      <div class="campo"><label for="d-cid">Local</label><input id="d-cid" name="cidade" type="text" value="Anchieta (SC)"></div>
+      <div class="campo"><label for="d-data">Data</label><input id="d-data" name="data" type="date" value="${hoje}"></div>
+    </div>
+    <div id="d-falta"></div>
+    <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Fechar</button><button type="submit" class="btn btn-primario">Gerar e baixar DOCX</button></div></div>
+  </form>`, async (f) => {
+    const op = opcoes(f);
+    const { dados, faltando } = montarDados(c, op);
+    if (faltando.length) {
+      dlg.querySelector("#d-falta").innerHTML = `<div class="faltando">Para gerar este documento, complete: <b>${faltando.join(", ")}</b>. <a href="#" id="abrir-ficha">Abrir a ficha</a></div>`;
+      dlg.querySelector("#abrir-ficha").onclick = (e) => { e.preventDefault(); dlg.close(); dialogoFicha(c); };
+      return;
+    }
+    const sufixo = { ambos: "", charles: " (Charles)", elmo: " (Elmo)" }[op.advogados] || "";
+    const nomeArq = `${MODELOS[op.modelo].nome.replace(/ \(.*\)$/, "")}${op.modelo.startsWith("procuracao") ? sufixo : ""} - ${c.nome}.docx`.replace(/[\\/:*?"<>|]/g, "");
+    try { await gerarDocx(op.modelo, dados, nomeArq); } catch (e) { return toast("Erro ao gerar: " + e.message, true); }
+    if (op.modelo.startsWith("contrato") && f.elements.registrar.checked) {
+      const modalidade = { contrato_previdenciario: "previdenciario", contrato_fixo: "fixo", contrato_misto: "misto" }[op.modelo];
+      const h = await db.from("honorarios").insert({
+        cliente_id: c.id, processo_id: op.processo || null, modalidade,
+        descricao: "Contrato: " + op.objeto.slice(0, 120), valor_fixo: op.valor_fixo || null,
+        percentual: modalidade === "fixo" ? null : op.percentual,
+      }).select().single();
+      if (h.error) toast("Documento gerado, mas não consegui registrar os honorários: " + h.error.message, true);
+      else if (op.valor_fixo > 0) {
+        const ps = dividirParcelas(op.valor_fixo, op.primeiro_vencimento ? op.parcelas : 1, op.primeiro_vencimento || op.data);
+        await db.from("parcelas").insert(ps.map((p) => ({ honorario_id: h.data.id, vencimento: p.vencimento, valor: p.valor })));
+      }
+    }
+    toast("Documento gerado. Confira o arquivo baixado.");
+    dlg.close();
+    if (op.modelo.startsWith("contrato") && depois) depois();
+  });
+  const f = dlg.querySelector("form");
+  const mostrar = () => {
+    const m = f.elements.modelo.value, contrato = m.startsWith("contrato");
+    dlg.querySelector("#b-adv").hidden = !(m === "procuracao" || contrato);
+    dlg.querySelector("#b-fin").hidden = m !== "procuracao";
+    dlg.querySelector("#b-hipo").hidden = m !== "procuracao";
+    dlg.querySelector("#b-obj").hidden = !contrato;
+    dlg.querySelector("#b-reg").hidden = !contrato;
+    dlg.querySelector("#b-perc").hidden = !(m === "contrato_previdenciario" || m === "contrato_misto");
+    dlg.querySelector("#b-valor").hidden = !(m === "contrato_fixo" || m === "contrato_misto");
+    dlg.querySelector("#b-parc").hidden = !(m === "contrato_fixo" || m === "contrato_misto");
+    f.elements.percentual.value = m === "contrato_misto" && f.elements.percentual.value === "30" ? "20" : m === "contrato_previdenciario" && f.elements.percentual.value === "20" ? "30" : f.elements.percentual.value;
+    dlg.querySelector("#d-falta").innerHTML = "";
+  };
+  f.elements.modelo.addEventListener("change", mostrar); mostrar();
+  f.elements.processo?.addEventListener("change", () => {
+    const p = S.proc[f.elements.processo.value];
+    if (p && !f.elements.objeto.value) f.elements.objeto.value = `atuação no processo ${p.titulo}${p.numero ? ", autos nº " + p.numero : ""}${p.juizo ? ", em trâmite perante " + p.juizo : ""}`;
+  });
+}
+function numBR(v) { const s = String(v || "").trim().replace(/[R$\s]/g, ""); if (!s) return 0; return Number(s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s) || 0; }
+function opcoes(f) {
+  return {
+    modelo: f.elements.modelo.value, advogados: f.elements.advogados.value, processo: f.elements.processo?.value || "",
+    finalidade: val(f, "finalidade"), objeto: val(f, "objeto"), percentual: numBR(val(f, "percentual")) || 30,
+    valor_fixo: numBR(val(f, "valor_fixo")), parcelas: parseInt(val(f, "parcelas") || "1", 10),
+    primeiro_vencimento: val(f, "primeiro_vencimento"), a_vista: !val(f, "primeiro_vencimento"),
+    hipossuficiencia: f.elements.hipossuficiencia.checked, cidade: val(f, "cidade") || "Anchieta (SC)", data: val(f, "data") || HOJE(),
+  };
+}
+
+function dialogoHonorario(h, depois) {
+  const novo = !h.id;
+  const procs = S.processos.filter((p) => p.cliente_id === h.cliente_id);
+  abrir(`
+  <form novalidate>
+    <h2>${novo ? "Registrar honorários" : "Editar honorários"}</h2>
+    <div class="campo"><label for="h-desc">Descrição</label><input id="h-desc" name="descricao" type="text" required value="${esc(h.descricao)}" placeholder="Ex.: Contrato da ação previdenciária"></div>
+    <div class="linha2">
+      <div class="campo"><label for="h-mod">Modalidade</label><select id="h-mod" name="modalidade">${[["fixo", "Valor fixo"], ["previdenciario", "Previdenciário (percentual)"], ["exito", "Êxito (percentual)"], ["misto", "Fixo + êxito"]].map(([k, t]) => `<option value="${k}" ${h.modalidade === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+      <div class="campo"><label for="h-proc">Processo</label><select id="h-proc" name="processo_id"><option value="">Nenhum</option>${procs.map((p) => `<option value="${p.id}" ${h.processo_id === p.id ? "selected" : ""}>${esc(p.titulo)}</option>`).join("")}</select></div>
+    </div>
+    <div class="linha2">
+      <div class="campo"><label for="h-valor">Valor fixo (R$)</label><input id="h-valor" name="valor_fixo" type="text" inputmode="decimal" value="${h.valor_fixo ? String(h.valor_fixo).replace(".", ",") : ""}"></div>
+      <div class="campo"><label for="h-perc">Percentual (%)</label><input id="h-perc" name="percentual" type="text" inputmode="decimal" value="${h.percentual ? String(h.percentual).replace(".", ",") : ""}"></div>
+    </div>
+    ${novo ? `<div class="linha2"><div class="campo"><label for="h-np">Nº de parcelas</label><input id="h-np" name="parcelas" type="number" min="1" max="60" value="1"></div>
+      <div class="campo"><label for="h-venc">1º vencimento</label><input id="h-venc" name="venc" type="date" value="${HOJE()}"><span class="dica">As parcelas do valor fixo são criadas automaticamente.</span></div></div>` : ""}
+    <div class="campo"><label for="h-obs">Observações</label><textarea id="h-obs" name="observacoes" style="min-height:60px">${esc(h.observacoes)}</textarea></div>
+    ${novo ? "" : `<label class="check"><input type="checkbox" name="encerrado" ${h.encerrado ? "checked" : ""}><span>Contrato encerrado</span></label>`}
+    <div class="dlg-botoes">${novo ? "" : '<button type="button" class="btn btn-perigo btn-peq" id="excluir">Excluir</button>'}
+      <div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div></div>
+  </form>`, async (f) => {
+    if (!val(f, "descricao")) return toast("Informe a descrição.", true);
+    const dados = { descricao: val(f, "descricao"), modalidade: f.elements.modalidade.value, processo_id: f.elements.processo_id.value || null,
+      valor_fixo: numBR(val(f, "valor_fixo")) || null, percentual: numBR(val(f, "percentual")) || null, observacoes: val(f, "observacoes") || null };
+    if (novo) dados.cliente_id = h.cliente_id; else dados.encerrado = f.elements.encerrado.checked;
+    const r = novo ? await db.from("honorarios").insert(dados).select().single() : await db.from("honorarios").update(dados).eq("id", h.id).select().single();
+    if (r.error) return toast(r.error.message, true);
+    if (novo && dados.valor_fixo) {
+      const ps = dividirParcelas(dados.valor_fixo, parseInt(val(f, "parcelas") || "1", 10), val(f, "venc") || HOJE());
+      await db.from("parcelas").insert(ps.map((p) => ({ honorario_id: r.data.id, vencimento: p.vencimento, valor: p.valor })));
+    }
+    dlg.close(); toast("Honorários salvos."); depois();
+  });
+  dlg.querySelector("#excluir")?.addEventListener("click", async () => {
+    if (!confirm("Excluir este registro de honorários e todas as parcelas?")) return;
+    const r = await db.from("honorarios").delete().eq("id", h.id);
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); depois();
+  });
+}
+
+function dialogoParcela(honorarioId, depois) {
+  abrir(`
+  <form novalidate><h2>Nova parcela</h2>
+    <div class="linha2"><div class="campo"><label for="p-v">Valor (R$)</label><input id="p-v" name="valor" type="text" inputmode="decimal" required></div>
+      <div class="campo"><label for="p-d">Vencimento</label><input id="p-d" name="venc" type="date" value="${HOJE()}" required></div></div>
+    <label class="check"><input type="checkbox" name="pago"><span>Já foi paga hoje</span></label>
+    <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div></div>
+  </form>`, async (f) => {
+    const v = numBR(val(f, "valor"));
+    if (!(v > 0)) return toast("Informe o valor.", true);
+    const r = await db.from("parcelas").insert({ honorario_id: honorarioId, valor: v, vencimento: val(f, "venc") || HOJE(), pago_em: f.elements.pago.checked ? HOJE() : null });
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); depois();
+  });
+}
+
+function dialogoChecklist(c, existentes, depois) {
+  abrir(`
+  <form novalidate><h2>Lista padrão de documentos</h2>
+    <div class="campo"><label for="k-tipo">Tipo de ação</label><select id="k-tipo" name="tipo">${Object.keys(CHECKLISTS).map((k) => `<option>${esc(k)}</option>`).join("")}</select></div>
+    <div id="k-prev" class="peq"></div>
+    <p class="peq mudo" style="margin-top:8px">Itens que já estão na lista do cliente não são duplicados.</p>
+    <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Adicionar à lista</button></div></div>
+  </form>`, async (f) => {
+    const ja = new Set(existentes.map((d) => norm(d.item)));
+    const novos = CHECKLISTS[f.elements.tipo.value].filter((i) => !ja.has(norm(i)));
+    if (!novos.length) { dlg.close(); return toast("Todos esses itens já estão na lista."); }
+    const r = await db.from("documentos").insert(novos.map((item, i) => ({ cliente_id: c.id, item, ordem: existentes.length + i })));
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); toast(`${novos.length} documento(s) adicionado(s).`); depois();
+  });
+  const f = dlg.querySelector("form");
+  const prev = () => (dlg.querySelector("#k-prev").innerHTML = "<ul>" + CHECKLISTS[f.elements.tipo.value].map((i) => `<li style="margin-left:18px">${esc(i)}</li>`).join("") + "</ul>");
+  f.elements.tipo.addEventListener("change", prev); prev();
 }
 
 function dialogoProcesso(p) {
@@ -390,13 +898,10 @@ function dialogoProcesso(p) {
       <div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div>
     </div>
   </form>`, async (f) => {
-    const dados = {
-      titulo: val(f, "titulo"), numero: val(f, "numero") || null, situacao: val(f, "situacao") || "Em andamento",
-      juizo: val(f, "juizo") || null, parte_contraria: val(f, "parte_contraria") || null, resumo: val(f, "resumo") || null,
-    };
+    const dados = { titulo: val(f, "titulo"), numero: val(f, "numero") || null, situacao: val(f, "situacao") || "Em andamento",
+      juizo: val(f, "juizo") || null, parte_contraria: val(f, "parte_contraria") || null, resumo: val(f, "resumo") || null };
     if (novo) dados.cliente_id = p.cliente_id; else dados.arquivado = f.elements.arquivado.checked;
-    const r = novo ? await db.from("processos").insert(dados).select().single()
-                   : await db.from("processos").update(dados).eq("id", p.id).select().single();
+    const r = novo ? await db.from("processos").insert(dados).select().single() : await db.from("processos").update(dados).eq("id", p.id).select().single();
     if (r.error) return toast(r.error.message, true);
     dlg.close(); toast("Processo salvo."); await recarregarBase(); rotear();
   });
@@ -416,7 +921,6 @@ function dialogoEvento({ evento, processo_id, escolherProcesso, depois }) {
     .map((p) => ({ id: p.id, rot: `${S.cli[p.cliente_id].nome} · ${p.titulo}${p.numero ? " · " + p.numero : ""}` }))
     .sort((a, b) => a.rot.localeCompare(b.rot, "pt-BR"));
   const pAtual = S.proc[e.processo_id];
-
   abrir(`
   <form>
     <h2>${novo ? "Lançar evento" : "Editar evento"}</h2>
@@ -454,28 +958,23 @@ function dialogoEvento({ evento, processo_id, escolherProcesso, depois }) {
       if (!o) return toast("Escolha o cliente e o processo na lista de sugestões.", true);
       pid = o.id;
     }
-    const tipo = f.elements.tipo.value;
-    const data = f.elements.data.value, hora = f.elements.hora.value;
+    const tipo = f.elements.tipo.value, data = f.elements.data.value, hora = f.elements.hora.value;
     if (tipo !== "andamento" && !data) return toast("Informe a data.", true);
     const link = val(f, "link");
     if (link && !/^https?:\/\//i.test(link)) return toast("O link precisa começar com https://", true);
     const dados = {
       processo_id: pid, tipo, titulo: val(f, "titulo"),
       data_hora: data ? isoDeBrasilia(data, hora || (tipo === "prazo" ? "18:00" : "09:00")) : null,
-      local: tipo === "andamento" ? null : val(f, "local") || null,
-      link: tipo === "andamento" ? null : link || null,
-      descricao: val(f, "descricao") || null,
-      visivel_cliente: f.elements.visivel.checked,
+      local: tipo === "andamento" ? null : val(f, "local") || null, link: tipo === "andamento" ? null : link || null,
+      descricao: val(f, "descricao") || null, visivel_cliente: f.elements.visivel.checked,
       notificar: f.elements.visivel.checked && f.elements.notificar.checked,
     };
-    const r = novo ? await db.from("eventos").insert(dados).select().single()
-                   : await db.from("eventos").update(dados).eq("id", e.id).select().single();
+    const r = novo ? await db.from("eventos").insert(dados).select().single() : await db.from("eventos").update(dados).eq("id", e.id).select().single();
     if (r.error) return toast(r.error.message, true);
     dlg.close();
     toast(dados.notificar && novo ? "Evento salvo. O e-mail ao cliente sai em alguns minutos (entre 7h e 20h)." : "Evento salvo.");
     (depois || rotear)();
   });
-
   const f = dlg.querySelector("form");
   const ajustar = (mudouTipo) => {
     const t = f.elements.tipo.value;
@@ -493,6 +992,97 @@ function dialogoEvento({ evento, processo_id, escolherProcesso, depois }) {
     const r = await db.from("eventos").delete().eq("id", e.id);
     if (r.error) return toast(r.error.message, true);
     dlg.close(); toast("Evento excluído."); (depois || rotear)();
+  });
+}
+
+// ================= IMPORTAR PLANILHA =================
+const COLUNAS = {
+  nome: ["nome", "cliente", "nome completo", "razao social"], email: ["email", "e-mail"], whatsapp: ["whatsapp", "celular", "telefone", "fone", "contato"],
+  cpf: ["cpf", "cpf/cnpj", "documento"], rg: ["rg", "identidade"], rg_orgao: ["orgao", "orgao expedidor", "expedidor"],
+  nascimento: ["nascimento", "data de nascimento", "data nascimento"], estado_civil: ["estado civil"], profissao: ["profissao"],
+  cep: ["cep"], logradouro: ["endereco", "logradouro", "rua"], numero: ["numero", "n", "nº"], bairro: ["bairro", "localidade"],
+  cidade: ["cidade", "municipio"], uf: ["uf", "estado"], mae: ["mae", "nome da mae"], nit: ["nit", "pis", "nit/pis"], nb: ["nb", "beneficio"],
+  proc_numero: ["processo", "numero do processo", "n do processo", "autos"], proc_titulo: ["assunto", "acao", "tipo de acao", "objeto"],
+  proc_juizo: ["vara", "juizo", "comarca"], proc_parte: ["parte contraria", "reu", "requerido"],
+};
+function mapearCabecalho(h) {
+  const n = norm(h).replace(/[._:]/g, " ").replace(/\s+/g, " ").trim();
+  for (const [k, lst] of Object.entries(COLUNAS)) if (lst.includes(n)) return k;
+  return null;
+}
+function paraData(v) {
+  if (!v) return null;
+  if (typeof v === "number") { const d = new Date(Math.round((v - 25569) * 864e5)); return d.toISOString().slice(0, 10); }
+  const m = String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? String(v) : null;
+}
+function paraEC(v) {
+  const n = norm(v);
+  if (!n) return null;
+  if (n.startsWith("solteir")) return "solteiro"; if (n.startsWith("casad")) return "casado"; if (n.includes("uniao") || n.includes("convivente")) return "uniao_estavel";
+  if (n.startsWith("divorc")) return "divorciado"; if (n.startsWith("separad")) return "separado"; if (n.startsWith("viuv")) return "viuvo";
+  return null;
+}
+async function carregarXLSX() {
+  if (window.XLSX) return;
+  await new Promise((ok, erro) => { const s = document.createElement("script"); s.src = "xlsx.mini.min.js"; s.onload = ok; s.onerror = erro; document.head.appendChild(s); });
+}
+function dialogoImportar() {
+  let linhas = [];
+  abrir(`
+  <form novalidate><h2>Importar clientes de planilha</h2>
+    <p class="peq mudo" style="margin-bottom:12px">Aceita Excel (.xlsx) ou CSV. A primeira linha deve ter os nomes das colunas, por exemplo: <b>Nome, CPF, E-mail, WhatsApp, Endereço, Cidade, UF, Processo, Assunto, Vara</b>. Clientes com CPF ou e-mail já cadastrados são ignorados.</p>
+    <div class="campo"><label for="i-arq">Arquivo</label><input id="i-arq" name="arquivo" type="file" accept=".xlsx,.xls,.csv"></div>
+    <div id="i-prev"></div>
+    <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario" id="i-ok" disabled>Importar</button></div></div>
+  </form>`, async () => {
+    const cpfs = new Set(S.clientes.map((c) => String(c.cpf || "").replace(/\D/g, "")).filter(Boolean));
+    const emails = new Set(S.clientes.map((c) => norm(c.email)).filter(Boolean));
+    let ok = 0, pulados = 0, procs = 0, erros = 0;
+    for (const l of linhas) {
+      const cpfD = String(l.cpf || "").replace(/\D/g, "");
+      if ((cpfD && cpfs.has(cpfD)) || (l.email && emails.has(norm(l.email)))) { pulados++; continue; }
+      const pj = cpfD.length === 14;
+      const dados = {
+        nome: l.nome, email: l.email ? norm(l.email) : null, whatsapp: normalizaWhats(l.whatsapp) || null,
+        tipo_pessoa: pj ? "pj" : "pf", cpf: !pj && cpfD ? mascaraCPF(cpfD) : null, cnpj: pj ? mascaraCNPJ(cpfD) : null,
+        rg: l.rg || null, rg_orgao: l.rg_orgao || null, nascimento: paraData(l.nascimento), estado_civil: paraEC(l.estado_civil),
+        profissao: l.profissao || null, cep: l.cep ? mascaraCEP(l.cep) : null, logradouro: l.logradouro || null, numero: l.numero ? String(l.numero) : null,
+        bairro: l.bairro || null, cidade: l.cidade || null, uf: l.uf ? String(l.uf).toUpperCase().slice(0, 2) : null, mae: l.mae || null,
+        nit: l.nit ? String(l.nit) : null, nb: l.nb ? String(l.nb) : null,
+      };
+      const r = await db.from("clientes").insert(dados).select().single();
+      if (r.error) { erros++; continue; }
+      ok++; if (cpfD) cpfs.add(cpfD); if (dados.email) emails.add(dados.email);
+      if (l.proc_numero || l.proc_titulo) {
+        const p = await db.from("processos").insert({ cliente_id: r.data.id, titulo: l.proc_titulo || "Processo", numero: l.proc_numero ? String(l.proc_numero) : null,
+          juizo: l.proc_juizo || null, parte_contraria: l.proc_parte || null });
+        if (!p.error) procs++;
+      }
+    }
+    dlg.close();
+    toast(`${ok} cliente(s) importado(s), ${procs} processo(s)${pulados ? `, ${pulados} já existiam` : ""}${erros ? `, ${erros} com erro` : ""}.`, erros > 0);
+    await recarregarBase(); telaClientes();
+  });
+  dlg.querySelector("#i-arq").addEventListener("change", async (ev) => {
+    const arq = ev.target.files[0]; if (!arq) return;
+    const prevEl = dlg.querySelector("#i-prev");
+    try {
+      await carregarXLSX();
+      const wb = window.XLSX.read(await arq.arrayBuffer(), { type: "array", cellDates: false });
+      const bruto = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "", raw: true });
+      if (!bruto.length) { prevEl.innerHTML = '<div class="faltando">A planilha está vazia.</div>'; return; }
+      const mapa = {}; const ignoradas = [];
+      Object.keys(bruto[0]).forEach((h) => { const k = mapearCabecalho(h); if (k && !mapa[k]) mapa[k] = h; else if (!k) ignoradas.push(h); });
+      if (!mapa.nome) { prevEl.innerHTML = '<div class="faltando">Não encontrei a coluna <b>Nome</b>. Renomeie o cabeçalho e tente de novo.</div>'; return; }
+      linhas = bruto.map((b) => Object.fromEntries(Object.entries(mapa).map(([k, h]) => [k, String(b[h] ?? "").trim() || (typeof b[h] === "number" ? b[h] : "")])))
+        .filter((l) => l.nome);
+      prevEl.innerHTML = `<p class="peq"><b>${linhas.length}</b> cliente(s) encontrados. Colunas reconhecidas: ${Object.keys(mapa).map((k) => `<span class="contador">${esc(mapa[k])} → ${k.replace("proc_", "processo: ")}</span>`).join(" ")}
+        ${ignoradas.length ? `<br><span class="mudo">Ignoradas: ${ignoradas.map(esc).join(", ")}</span>` : ""}</p>
+        <table class="tabela-prev"><tr><th>Nome</th><th>CPF</th><th>E-mail</th><th>Cidade</th></tr>${linhas.slice(0, 5).map((l) => `<tr><td>${esc(l.nome)}</td><td>${esc(l.cpf)}</td><td>${esc(l.email)}</td><td>${esc(l.cidade)}</td></tr>`).join("")}</table>`;
+      dlg.querySelector("#i-ok").disabled = !linhas.length;
+    } catch (e) { prevEl.innerHTML = `<div class="faltando">Não consegui ler o arquivo: ${esc(e.message)}</div>`; }
   });
 }
 

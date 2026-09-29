@@ -61,10 +61,11 @@ async function carregarPortal(session) {
   app.innerHTML = '<div class="carregando">Carregando seus processos...</div>';
   if (location.hash) history.replaceState(null, "", location.pathname);
 
-  const [cad, procs, evs] = await Promise.all([
+  const [cad, procs, evs, docs] = await Promise.all([
     db.rpc("meu_cadastro"),
     db.from("processos").select("*").order("criado_em", { ascending: true }),
     db.from("eventos").select("*").order("data_hora", { ascending: true, nullsFirst: false }),
+    db.from("documentos").select("*").eq("entregue", false).order("ordem", { ascending: true }),
   ]);
   if (cad.error || procs.error || evs.error) {
     app.innerHTML = `<div class="wrap"><div class="saudacao"><div class="aviso aviso-erro">Não foi possível carregar seus dados agora. Tente novamente em alguns minutos.</div></div></div>`;
@@ -79,10 +80,10 @@ async function carregarPortal(session) {
     </div></div>`;
     return;
   }
-  render(cliente, procs.data || [], evs.data || []);
+  render(cliente, procs.data || [], evs.data || [], docs.error ? [] : docs.data || []);
 }
 
-function render(cliente, processos, eventos) {
+function render(cliente, processos, eventos, pendentes = []) {
   const agora = Date.now();
   const procPorId = Object.fromEntries(processos.map((p) => [p.id, p]));
   const futuros = eventos
@@ -99,6 +100,13 @@ function render(cliente, processos, eventos) {
       <h1>Olá, ${esc(primeiroNome(cliente.nome))}.</h1>
       <p class="mudo">Aqui você acompanha seus processos e os próximos compromissos.</p>
     </section>
+
+    ${pendentes.length ? `<section class="secao">
+      <h2>Documentos que precisamos</h2>
+      <div class="pendentes"><p class="peq mudo" style="margin-bottom:6px">Para darmos andamento ao seu caso, envie os documentos abaixo pelo WhatsApp do escritório (foto ou PDF).</p>
+        <ul>${pendentes.map((d) => `<li>${esc(d.item)}</li>`).join("")}</ul>
+        <a class="btn btn-whats btn-peq" style="margin-top:10px" target="_blank" rel="noopener" href="${linkWhats(WHATS_ESCRITORIO, `Olá! Sou ${cliente.nome} e estou enviando os documentos pedidos.`)}">${ICON_WHATS} Enviar pelo WhatsApp</a></div>
+    </section>` : ""}
 
     <section class="secao">
       <h2>Próximos compromissos</h2>
