@@ -26,6 +26,7 @@
     <button class="aba" role="tab" data-rota="resumo">Resumo</button>
     <button class="aba" role="tab" data-rota="agenda">Agenda</button>
     <button class="aba" role="tab" data-rota="clientes">Clientes</button>
+    <button class="aba" role="tab" data-rota="publicacoes">Publicações</button>
     <button class="aba" role="tab" data-rota="honorarios">Honorários</button>
     <button class="aba" role="tab" data-rota="envios">Avisos enviados</button>
   </div>
@@ -118,6 +119,7 @@ function rotear() {
   if (rota === "clientes") return telaClientes();
   if (rota === "cliente" && id) return telaCliente(id);
   if (rota === "honorarios") return telaHonorarios();
+  if (rota === "publicacoes") return telaPublicacoes();
   if (rota === "envios") return telaEnvios();
   return telaResumo();
 }
@@ -192,12 +194,14 @@ async function telaResumo() {
   const hoje = HOJE();
   const iniHoje = isoDeBrasilia(hoje, "00:00");
   const fim7 = isoDeBrasilia(somaDias(hoje, 7), "23:59");
-  const [ev, hon, par, docs] = await Promise.all([
+  const [ev, hon, par, docs, pubs] = await Promise.all([
     db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", iniHoje).lte("data_hora", fim7).order("data_hora", { ascending: true }),
     db.from("honorarios").select("*"),
     db.from("parcelas").select("*").order("vencimento", { ascending: true }),
     db.from("documentos").select("*"),
+    db.from("publicacoes").select("id").eq("lida", false),
   ]);
+  const naoLidas = pubs.error ? 0 : pubs.data.length;
   const erro = ev.error || hon.error || par.error || docs.error;
   if (erro) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc(erro.message)}</div></div>`);
   const honPor = Object.fromEntries(hon.data.map((h) => [h.id, h]));
@@ -227,6 +231,7 @@ async function telaResumo() {
     <div class="barra"><div><h1>${saudacao()}, ${esc(primeiroNome(S.advogado.nome))}.</h1><p class="mudo peq">${esc(dataLonga(new Date().toISOString()))}</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="r-cli">+ Novo cliente</button><button class="btn btn-primario" id="r-ev">+ Lançar evento</button></div></div>
     <div class="cards">
+      <a class="card-num ${naoLidas ? "aviso" : ""}" href="#publicacoes"><div class="n">${naoLidas}</div><div class="l">publicações novas do DJEN</div></a>
       <a class="card-num" href="#agenda"><div class="n">${compromissos.length}</div><div class="l">audiências, perícias e reuniões em 7 dias</div></a>
       <a class="card-num ${prazos.length ? "aviso" : ""}" href="#agenda"><div class="n">${prazos.length}</div><div class="l">prazos nos próximos 7 dias</div></a>
       <a class="card-num ${vencidas.length ? "alerta" : ""}" href="#honorarios"><div class="n">${moeda(soma(vencidas))}</div><div class="l">honorários vencidos (${vencidas.length} parcela${vencidas.length === 1 ? "" : "s"})</div></a>
@@ -496,6 +501,114 @@ async function telaCliente(id) {
     const r = await db.from("parcelas").delete().eq("id", b.dataset.delParc); if (r.error) toast(r.error.message, true); recarregar();
   }));
   ligarEventos(app, evs, recarregar);
+}
+
+
+// ================= PUBLICAÇÕES (DJEN, pela OAB) =================
+async function telaPublicacoes() {
+  const filtro = S.filtroPub || "nao-lidas";
+  app.innerHTML = '<div class="carregando">Carregando publicações...</div>';
+  let q = db.from("publicacoes").select("*").order("data_disp", { ascending: false }).order("id", { ascending: false }).limit(300);
+  if (filtro === "nao-lidas") q = q.eq("lida", false);
+  const [r, req] = await Promise.all([q, db.from("djen_requisicoes").select("*").order("criado_em", { ascending: false }).limit(12)]);
+  if (r.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc(r.error.message)}. Confira se o script 07 (publicações) foi executado no Supabase.</div></div>`);
+  let lista = r.data;
+  if (filtro === "sem-processo") lista = lista.filter((p) => !p.processo_id);
+  const ult = (req.data || [])[0];
+  const erros = (req.data || []).filter((x) => x.processado && x.status && x.status !== 200);
+  const statusTxt = !ult ? "Nenhuma consulta feita ainda."
+    : `Última consulta: ${dataBR(ult.criado_em)} ${horaBR(ult.criado_em)}${ult.processado ? (ult.status === 200 ? ` · ok (${ult.itens ?? 0} itens)` : ` · falhou (${ult.status || "sem resposta"})`) : " · aguardando resposta"}`;
+  const procPorNum = {};
+  S.processos.forEach((p) => { const k = String(p.numero || "").replace(/\D/g, ""); if (k) (procPorNum[k] ||= []).push(p); });
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <div class="barra"><div><h1>Publicações</h1><p class="mudo peq">Capturadas automaticamente no Diário de Justiça Eletrônico Nacional (DJEN) pelas OABs 77.242/SC, 136.810/PR e 42.994/SC, de hora em hora, das 6h às 20h.</p>
+      <p class="peq ${erros.length ? "" : "mudo"}" style="${erros.length ? "color:var(--err)" : ""}">${esc(statusTxt)}</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="buscar30">Buscar últimos 30 dias</button><button class="btn btn-primario" id="buscar">Buscar agora</button></div></div>
+    <div class="barra"><select id="f-pub" style="max-width:280px" aria-label="Filtro">
+      <option value="nao-lidas">Não lidas</option><option value="todas">Todas (últimas 300)</option><option value="sem-processo">De processos não cadastrados</option></select>
+      ${lista.some((p) => !p.lida) ? '<button class="btn btn-sec btn-peq" id="ler-todas">Marcar todas como lidas</button>' : ""}</div>
+    ${lista.length ? `<div class="lista">${lista.map((p) => {
+      const procs = procPorNum[p.numero_processo] || [];
+      const c = procs[0] && S.cli[procs[0].cliente_id];
+      const longo = (p.texto || "").length > 420;
+      return `<div class="item" style="align-items:flex-start"><div class="principal" style="flex:1">
+        <div><span class="peq mudo">${p.data_disp ? dBR(p.data_disp) : ""}${p.tribunal ? " · " + esc(p.tribunal) : ""}${p.orgao ? " · " + esc(p.orgao) : ""}</span> ${p.lida ? "" : '<span class="tag tag-prazo">nova</span>'}</div>
+        <div><b>${esc(p.tipo || "Comunicação")}</b> · processo ${esc(p.numero_mascara || p.numero_processo || "sem número")}</div>
+        <div class="sec">${c ? procs.map((pp) => `<a href="#cliente/${pp.cliente_id}">${esc(S.cli[pp.cliente_id]?.nome || "")}</a> · ${esc(pp.titulo)}`).join("<br>") : '<span style="color:var(--warn)">processo não cadastrado no painel</span>'}</div>
+        <div class="peq" style="margin-top:6px;white-space:pre-line" data-txt="${p.id}">${esc(longo ? p.texto.slice(0, 420) + "..." : p.texto || "")}</div>
+        ${longo ? `<button class="mais" style="padding:4px 0" data-vermais="${p.id}">Ver texto completo</button>` : ""}
+        ${p.link ? `<div class="peq"><a href="${esc(p.link)}" target="_blank" rel="noopener">Abrir o documento</a></div>` : ""}
+      </div><div class="dir" style="flex-direction:column;align-items:stretch">
+        ${c ? `<button class="btn btn-sec btn-peq" data-mostrar="${p.id}">Mostrar ao cliente</button>` : `<button class="btn btn-primario btn-peq" data-cadastrar="${p.id}">Cadastrar processo</button>`}
+        ${p.lida ? "" : `<button class="btn btn-sec btn-peq" data-lida="${p.id}">Marcar como lida</button>`}
+      </div></div>`;
+    }).join("")}</div>` : `<div class="vazio">${filtro === "nao-lidas" ? "Nenhuma publicação nova." : "Nenhuma publicação encontrada."} Use "Buscar agora" para consultar o DJEN.</div>`}
+  </div>`;
+  const sel = app.querySelector("#f-pub"); sel.value = filtro;
+  sel.onchange = () => { S.filtroPub = sel.value; telaPublicacoes(); };
+  const buscar = async (dias) => {
+    const r1 = await db.rpc("djen_buscar_agora", { dias });
+    if (r1.error) return toast(r1.error.message, true);
+    toast("Consultando o DJEN... aguarde alguns segundos.");
+    await new Promise((ok) => setTimeout(ok, 15000));
+    const r2 = await db.rpc("djen_processar_agora");
+    if (r2.error) return toast(r2.error.message, true);
+    toast(r2.data ? `${r2.data} publicação(ões) nova(s).` : "Nenhuma publicação nova nesta consulta.");
+    telaPublicacoes();
+  };
+  app.querySelector("#buscar").onclick = (e) => { e.target.disabled = true; buscar(3); };
+  app.querySelector("#buscar30").onclick = (e) => { e.target.disabled = true; buscar(30); };
+  app.querySelector("#ler-todas")?.addEventListener("click", async () => {
+    const ids = lista.filter((p) => !p.lida).map((p) => p.id);
+    const r3 = await db.from("publicacoes").update({ lida: true }).in("id", ids);
+    if (r3.error) toast(r3.error.message, true); telaPublicacoes();
+  });
+  app.querySelectorAll("[data-vermais]").forEach((b) => (b.onclick = () => {
+    const p = lista.find((x) => String(x.id) === b.dataset.vermais);
+    app.querySelector(`[data-txt="${p.id}"]`).textContent = p.texto; b.remove();
+  }));
+  app.querySelectorAll("[data-lida]").forEach((b) => (b.onclick = async () => {
+    await db.from("publicacoes").update({ lida: true }).eq("id", Number(b.dataset.lida)); telaPublicacoes();
+  }));
+  app.querySelectorAll("[data-mostrar]").forEach((b) => (b.onclick = () => {
+    const p = lista.find((x) => String(x.id) === b.dataset.mostrar);
+    const procs = procPorNum[p.numero_processo] || [];
+    dialogoEvento({ evento: { tipo: "andamento", titulo: p.tipo || "Publicação no processo", descricao: "", visivel_cliente: true, notificar: true, processo_id: procs[0].id },
+      escolherProcesso: false, depois: async () => { await db.from("publicacoes").update({ lida: true }).eq("id", p.id); telaPublicacoes(); } });
+    toast("Escreva ao cliente, em linguagem simples, o que a publicação significa.");
+  }));
+  app.querySelectorAll("[data-cadastrar]").forEach((b) => (b.onclick = () => dialogoCadastrarPub(lista.find((x) => String(x.id) === b.dataset.cadastrar))));
+}
+
+function dialogoCadastrarPub(pub) {
+  const nomes = S.clientes.map((c) => c.nome).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  abrir(`
+  <form novalidate><h2>Cadastrar processo</h2>
+    <p class="peq mudo" style="margin:-8px 0 14px">Processo ${esc(pub.numero_mascara || pub.numero_processo)}${pub.orgao ? " · " + esc(pub.orgao) : ""}</p>
+    <div class="campo"><label for="cp-cli">Cliente</label><input id="cp-cli" name="cliente" type="search" list="cp-lista" required autocomplete="off" placeholder="Digite o nome; se não existir, será criado">
+      <datalist id="cp-lista">${nomes.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist></div>
+    <div class="campo"><label for="cp-tit">Título do processo</label><input id="cp-tit" name="titulo" type="text" required placeholder="Ex.: Ação de cobrança"></div>
+    <div class="linha2"><div class="campo"><label for="cp-juizo">Juízo</label><input id="cp-juizo" name="juizo" type="text" value="${esc(pub.orgao || "")}"></div>
+      <div class="campo"><label for="cp-parte">Parte contrária</label><input id="cp-parte" name="parte" type="text"></div></div>
+    <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Cadastrar</button></div></div>
+  </form>`, async (f) => {
+    const nome = val(f, "cliente"), titulo = val(f, "titulo");
+    if (!nome || !titulo) return toast("Informe o cliente e o título.", true);
+    let c = S.clientes.find((x) => norm(x.nome) === norm(nome));
+    if (!c) {
+      const rc = await db.from("clientes").insert({ nome, origem: "djen" }).select().single();
+      if (rc.error) return toast(rc.error.message, true);
+      c = rc.data;
+    }
+    const numero = pub.numero_mascara || pub.numero_processo;
+    const rp = await db.from("processos").insert({ cliente_id: c.id, titulo, numero, juizo: val(f, "juizo") || null, parte_contraria: val(f, "parte") || null }).select().single();
+    if (rp.error) return toast(rp.error.message, true);
+    await db.from("eventos").insert({ processo_id: rp.data.id, tipo: "andamento", titulo: "Publicação no DJEN: " + (pub.tipo || "Comunicação"),
+      descricao: (pub.texto || "").slice(0, 4000), data_hora: isoDeBrasilia(pub.data_disp || HOJE(), "12:00"), visivel_cliente: false, notificar: false });
+    await db.from("publicacoes").update({ processo_id: rp.data.id }).eq("numero_processo", pub.numero_processo);
+    dlg.close(); toast("Processo cadastrado."); await recarregarBase(); telaPublicacoes();
+  });
 }
 
 // ================= HONORÁRIOS (visão geral) =================
