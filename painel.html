@@ -64,6 +64,15 @@ const CHECKLISTS = {
   "Inventário / arrolamento": ["Certidão de óbito", "RG, CPF e certidões dos herdeiros", "Certidão de casamento do falecido", "Matrículas e documentos dos bens", "Certidões negativas (municipal, estadual e federal)", "Extratos bancários do falecido"],
 };
 
+const AREAS = {
+  previdenciario: ["Previdenciário", "#E3ECF6", "#1F4A7A"], civel: ["Cível", "#EEEEF0", "#4A4F58"], familia: ["Família", "#F6E9EF", "#7A2F55"],
+  sucessoes: ["Sucessões", "#F1E9DF", "#6A4F37"], criminal: ["Criminal", "#F8E6E3", "#8A2E22"], trabalhista: ["Trabalhista", "#FBF1DC", "#7A5200"],
+  bancario: ["Bancário", "#E6F0EE", "#245B50"], consumidor: ["Consumidor", "#EAF3E4", "#3D6224"], imobiliario: ["Imobiliário", "#EDE8F5", "#4E3A7A"],
+  administrativo: ["Administrativo", "#E4EEF3", "#285A6E"], empresarial: ["Empresarial", "#F0ECE4", "#5A4A30"],
+};
+const tagArea = (a) => (a && AREAS[a] ? `<span class="tag" style="background:${AREAS[a][1]};color:${AREAS[a][2]}">${AREAS[a][0]}</span>` : "");
+const areasDoCliente = (id) => [...new Set(S.processos.filter((p) => p.cliente_id === id && !p.arquivado && p.area).map((p) => p.area))];
+
 const S = { advogado: null, clientes: [], processos: [], cli: {}, proc: {}, iniciado: false };
 
 // ================= início =================
@@ -221,6 +230,9 @@ async function telaResumo() {
   const compromissos = ev.data.filter((e) => e.tipo !== "prazo");
   const iniMes = hoje.slice(0, 8) + "01";
   const recebidoMes = soma(par.data.filter((p) => p.pago_em && p.pago_em >= iniMes && p.pago_em <= hoje));
+  const porArea = {};
+  S.processos.filter((p) => !p.arquivado).forEach((p) => { const k = p.area || ""; porArea[k] ||= { proc: 0, cli: new Set() }; porArea[k].proc++; porArea[k].cli.add(p.cliente_id); });
+  const linhasArea = Object.entries(porArea).sort((a, b) => b[1].proc - a[1].proc);
 
   const linhaParcela = (p) => {
     const h = honPor[p.honorario_id], c = h && S.cli[h.cliente_id];
@@ -248,6 +260,9 @@ async function telaResumo() {
       <div>
         <div class="bloco"><h2 style="margin-bottom:10px">Próximos 7 dias</h2>
           ${ev.data.length ? `<div class="lista">${ev.data.map((e) => itemEvento(e)).join("")}</div>` : `<div class="vazio">Nada marcado para os próximos 7 dias.</div>`}</div>
+        ${linhasArea.length ? `<div class="bloco"><h2 style="margin-bottom:10px">Processos por área</h2><div class="lista">${linhasArea.map(([k, v]) => `
+          <a class="item clicavel" style="text-decoration:none;color:inherit" href="#clientes" data-filtro="area:${k}"><div class="principal">${tagArea(k) || '<span class="tag tag-oculto">sem área</span>'}</div>
+            <div class="dir peq mudo">${v.proc} processo${v.proc === 1 ? "" : "s"} · ${v.cli.size} cliente${v.cli.size === 1 ? "" : "s"}</div></a>`).join("")}</div></div>` : ""}
       </div>
       <div>
         <div class="bloco"><h2 style="margin-bottom:10px">Honorários a receber</h2>
@@ -317,6 +332,7 @@ async function telaClientes() {
       <select id="filtro" style="max-width:260px" aria-label="Filtro">
         <option value="">Todos os clientes</option><option value="ativos">Somente ativos</option><option value="incompletas">Fichas incompletas</option>
         <option value="sem-email">Sem e-mail</option><option value="docs">Com documentos pendentes</option><option value="inativos">Inativos</option>
+        <optgroup label="Por área do direito">${Object.entries(AREAS).map(([k, a]) => `<option value="area:${k}">${a[0]}</option>`).join("")}<option value="area:">Sem área</option></optgroup>
       </select>
     </div>
     <div class="lista" id="lista"></div>
@@ -338,6 +354,10 @@ async function telaClientes() {
       if (f === "incompletas" && !(c.ativo && pendenciasFicha(c).length)) return false;
       if (f === "sem-email" && (c.email || !c.ativo)) return false;
       if (f === "docs" && !pend[c.id]) return false;
+      if (f.startsWith("area:")) {
+        const ps = S.processos.filter((p) => p.cliente_id === c.id && !p.arquivado);
+        if (f === "area:" ? !ps.some((p) => !p.area) : !ps.some((p) => p.area === f.slice(5))) return false;
+      }
       if (!q) return true;
       if (norm(c.nome).includes(q) || norm(c.email).includes(q)) return true;
       if (qd.length >= 4 && [c.whatsapp, c.cpf, c.cnpj].some((x) => String(x || "").replace(/\D/g, "").includes(qd))) return true;
@@ -349,7 +369,7 @@ async function telaClientes() {
       return `<div class="item clicavel ${c.ativo ? "" : "inativo"}" data-cli="${c.id}">
         <div class="principal"><b>${esc(c.nome)}</b>${c.ativo ? "" : ' <span class="tag tag-oculto">inativo</span>'}${pf.length && c.ativo ? ' <span class="tag tag-incompleta">ficha incompleta</span>' : ""}
           <div class="sec">${c.cpf ? "CPF " + esc(c.cpf) + " · " : c.cnpj ? "CNPJ " + esc(c.cnpj) + " · " : ""}${c.email ? esc(c.email) : '<span style="color:var(--warn)">sem e-mail</span>'}${c.whatsapp ? " · " + mostraWhats(c.whatsapp) : ""}${c.cidade ? " · " + esc(c.cidade) : ""}</div></div>
-        <div class="dir"><span class="contador">${nProc[c.id] || 0} processo${(nProc[c.id] || 0) === 1 ? "" : "s"}</span></div>
+        <div class="dir" style="align-items:center">${areasDoCliente(c.id).map(tagArea).join(" ")}<span class="contador">${nProc[c.id] || 0} processo${(nProc[c.id] || 0) === 1 ? "" : "s"}</span></div>
       </div>`;
     }).join("") : `<div class="vazio" style="border:0">Nenhum cliente encontrado.</div>`;
   };
@@ -435,7 +455,7 @@ async function telaCliente(id) {
             return `
             <div class="proc-admin ${p.arquivado ? "inativo" : ""}">
               <div class="cab">
-                <div><h3>${esc(p.titulo)}${p.arquivado ? ' <span class="tag tag-oculto">encerrado</span>' : ""}</h3>
+                <div><div style="margin-bottom:4px">${tagArea(p.area) || '<span class="tag tag-oculto">sem área</span>'}</div><h3>${esc(p.titulo)}${p.arquivado ? ' <span class="tag tag-oculto">encerrado</span>' : ""}</h3>
                   <div class="sec peq mudo">${[p.numero && "nº " + esc(p.numero), p.juizo && esc(p.juizo), p.parte_contraria && "x " + esc(p.parte_contraria)].filter(Boolean).join(" · ") || "sem número"}</div>
                   <span class="situacao">${esc(p.situacao)}</span>${p.valor_causa ? ` <span class="peq mudo">· valor da causa ${moeda(p.valor_causa)}</span>` : ""}</div>
                 <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
@@ -498,7 +518,7 @@ async function telaCliente(id) {
   app.querySelectorAll("[data-novo-ev]").forEach((b) => (b.onclick = () => dialogoEvento({ processo_id: b.dataset.novoEv, depois: recarregar })));
   app.querySelectorAll("[data-calc-proc]").forEach((b) => (b.onclick = () => {
     const pr = S.proc[b.dataset.calcProc];
-    const prev = /previd|inss|aposent|benef|aux[ií]lio|pens[aã]o|bpc|loas|maternidade|incapacidade/i.test([pr.titulo, pr.parte_contraria, pr.juizo].join(" "));
+    const prev = pr.area ? pr.area === "previdenciario" : /previd|inss|aposent|benef|aux[ií]lio|pens[aã]o|bpc|loas|maternidade|incapacidade/i.test([pr.titulo, pr.parte_contraria, pr.juizo].join(" "));
     S.calcPreset = { aba: prev ? "causa" : "atualizacao", cliente_id: pr.cliente_id, processo_id: pr.id };
     location.hash = "calculos";
   }));
@@ -1465,6 +1485,9 @@ function dialogoProcesso(p) {
   <form>
     <h2>${novo ? "Novo processo" : "Editar processo"}</h2>
     <div class="campo"><label for="titulo">Título para o cliente</label><input id="titulo" name="titulo" type="text" required placeholder="Ex.: Aposentadoria rural" value="${esc(p.titulo)}"></div>
+    <div class="campo"><label for="area">Área do direito</label><select id="area" name="area">
+      <option value="">${novo ? "Identificar pelo título (automático)" : "Identificar automaticamente"}</option>
+      ${Object.entries(AREAS).map(([k, a]) => `<option value="${k}" ${p.area === k ? "selected" : ""}>${a[0]}</option>`).join("")}</select></div>
     <div class="linha2">
       <div class="campo"><label for="numero">Número do processo</label><input id="numero" name="numero" type="text" placeholder="0000000-00.0000.0.00.0000" value="${esc(p.numero)}"></div>
       <div class="campo"><label for="situacao">Situação</label><input id="situacao" name="situacao" type="text" list="situacoes" value="${esc(p.situacao || "Em andamento")}">
@@ -1484,7 +1507,7 @@ function dialogoProcesso(p) {
   </form>`, async (f) => {
     const dados = { titulo: val(f, "titulo"), numero: val(f, "numero") || null, situacao: val(f, "situacao") || "Em andamento",
       juizo: val(f, "juizo") || null, parte_contraria: val(f, "parte_contraria") || null, resumo: val(f, "resumo") || null,
-      valor_causa: val(f, "valor_causa") ? numBR(val(f, "valor_causa")) : null };
+      valor_causa: val(f, "valor_causa") ? numBR(val(f, "valor_causa")) : null, area: val(f, "area") || null };
     if (novo) dados.cliente_id = p.cliente_id; else dados.arquivado = f.elements.arquivado.checked;
     const r = novo ? await db.from("processos").insert(dados).select().single() : await db.from("processos").update(dados).eq("id", p.id).select().single();
     if (r.error) return toast(r.error.message, true);
