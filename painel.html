@@ -208,16 +208,18 @@ async function telaResumo() {
   const hoje = HOJE();
   const iniHoje = isoDeBrasilia(hoje, "00:00");
   const fim7 = isoDeBrasilia(somaDias(hoje, 7), "23:59");
-  const [ev, hon, par, docs, pubs, fil] = await Promise.all([
+  const [ev, hon, par, docs, pubs, fil, ale] = await Promise.all([
     db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", iniHoje).lte("data_hora", fim7).order("data_hora", { ascending: true }),
     db.from("honorarios").select("*"),
     db.from("parcelas").select("*").order("vencimento", { ascending: true }),
     db.from("documentos").select("*"),
     db.from("publicacoes").select("id").eq("lida", false),
-    db.from("fila").select("id,prazo").neq("etapa", "ajuizado"),
+    db.from("fila").select("id,prazo,prazo_ajuizar").neq("etapa", "ajuizado"),
+    db.from("atendimento_alertas").select("*").is("resolvido_em", null).order("criado_em", { ascending: false }).limit(30),
   ]);
+  const alertasAt = ale.error ? [] : ale.data;
   const naFila = fil.error ? [] : fil.data;
-  const filaPrazo = naFila.filter((x) => x.prazo && x.prazo <= somaDias(hoje, 15)).length;
+  const filaPrazo = naFila.filter((x) => (x.prazo && x.prazo <= somaDias(hoje, 15)) || (x.prazo_ajuizar && x.prazo_ajuizar <= somaDias(hoje, 2))).length;
   const naoLidas = pubs.error ? 0 : pubs.data.length;
   const erro = ev.error || hon.error || par.error || docs.error;
   if (erro) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc(erro.message)}</div></div>`);
@@ -252,7 +254,8 @@ async function telaResumo() {
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="r-cli">+ Novo cliente</button><button class="btn btn-primario" id="r-ev">+ Lançar evento</button></div></div>
     <div class="cards">
       <a class="card-num ${naoLidas ? "aviso" : ""}" href="#publicacoes"><div class="n">${naoLidas}</div><div class="l">publicações novas do DJEN</div></a>
-      <a class="card-num ${filaPrazo ? "alerta" : ""}" href="#fila"><div class="n">${naFila.length}</div><div class="l">ações na fila de ajuizamento${filaPrazo ? ` (${filaPrazo} com prazo em 15 dias)` : ""}</div></a>
+      <a class="card-num ${filaPrazo ? "alerta" : ""}" href="#fila"><div class="n">${naFila.length}</div><div class="l">ações na fila de ajuizamento${filaPrazo ? ` (${filaPrazo} no limite ou atrasada${filaPrazo === 1 ? "" : "s"})` : ""}</div></a>
+      <a class="card-num ${alertasAt.length ? "alerta" : ""}" href="#resumo" data-ir-alertas><div class="n">${alertasAt.length}</div><div class="l">pedidos do atendimento online</div></a>
       <a class="card-num" href="#agenda"><div class="n">${compromissos.length}</div><div class="l">audiências, perícias e reuniões em 7 dias</div></a>
       <a class="card-num ${prazos.length ? "aviso" : ""}" href="#agenda"><div class="n">${prazos.length}</div><div class="l">prazos nos próximos 7 dias</div></a>
       <a class="card-num ${vencidas.length ? "alerta" : ""}" href="#honorarios"><div class="n">${moeda(soma(vencidas))}</div><div class="l">honorários vencidos (${vencidas.length} parcela${vencidas.length === 1 ? "" : "s"})</div></a>
@@ -262,6 +265,15 @@ async function telaResumo() {
       <a class="card-num" href="#clientes" data-filtro="docs"><div class="n">${Object.keys(docsPend).length}</div><div class="l">clientes com documentos pendentes</div></a>
       <a class="card-num" href="#clientes"><div class="n">${ativos.length}</div><div class="l">clientes ativos</div></a>
     </div>
+    ${alertasAt.length ? `<div class="bloco" id="bloco-alertas"><h2 style="margin-bottom:10px">Atendimento online: pedidos de retorno</h2><div class="lista">${alertasAt.map((a) => {
+      const c = a.cliente_id && S.cli[a.cliente_id];
+      const fone = String(a.contato || c?.whatsapp || "").replace(/\D/g, "");
+      const TIPO = { fila: "consultou ação ainda não ajuizada", mensagem: "deixou mensagem", sem_email: "sem e-mail para receber o código", nao_identificado: "não identificado no WhatsApp" };
+      return `<div class="item"><div class="principal"><b>${c ? `<a href="#cliente/${c.id}">${esc(c.nome)}</a>` : "Não identificado"}</b> <span class="tag tag-prazo">${esc(TIPO[a.tipo] || a.tipo)}</span>
+        <div class="sec">${dataBR(a.criado_em)} ${horaBR(a.criado_em)} · ${a.canal === "whatsapp" ? "WhatsApp" : "site"}${fone ? " · " + esc(mostraWhats(fone)) : ""}</div>
+        ${a.mensagem ? `<div class="peq" style="white-space:pre-line;margin-top:4px">${esc(a.mensagem)}</div>` : ""}</div>
+        <div class="dir">${fone ? botaoWhats(fone, c ? `Olá, ${primeiroNome(c.nome)}! Aqui é do escritório Charles Borges Advocacia, sobre o seu atendimento online.` : "Olá! Aqui é do escritório Charles Borges Advocacia.", "Responder") : ""}<button class="btn btn-sec btn-peq" data-resolver="${a.id}">Resolvido</button></div></div>`;
+    }).join("")}</div></div>` : ""}
     <div class="colunas">
       <div>
         <div class="bloco"><h2 style="margin-bottom:10px">Próximos 7 dias</h2>
@@ -283,6 +295,11 @@ async function telaResumo() {
   app.querySelectorAll("[data-filtro]").forEach((a) => a.addEventListener("click", () => (S.filtroClientes = a.dataset.filtro)));
   app.querySelectorAll("[data-cli]").forEach((i) => (i.onclick = () => (location.hash = "cliente/" + i.dataset.cli)));
   app.querySelectorAll("[data-pagar]").forEach((b) => (b.onclick = async () => { await marcarPago(b.dataset.pagar); telaResumo(); }));
+  app.querySelector("[data-ir-alertas]")?.addEventListener("click", (e) => { e.preventDefault(); app.querySelector("#bloco-alertas")?.scrollIntoView({ behavior: "smooth" }); });
+  app.querySelectorAll("[data-resolver]").forEach((b) => (b.onclick = async () => {
+    const r = await db.from("atendimento_alertas").update({ resolvido_em: new Date().toISOString(), resolvido_por: S.advogado.email }).eq("id", b.dataset.resolver);
+    if (r.error) return toast(r.error.message, true); telaResumo();
+  }));
   ligarEventos(app, ev.data, telaResumo);
 }
 
@@ -459,7 +476,7 @@ async function telaCliente(id) {
         <div class="bloco">
           <div class="barra"><h2>Fila de ajuizamento</h2><button class="btn btn-sec btn-peq" id="nova-fila-cli">+ Incluir na fila</button></div>
           ${naFila.length ? `<div class="lista">${naFila.map((x) => `<div class="item"><div class="principal"><b>${esc(x.titulo)}</b> ${tagArea(x.area)}
-            <div class="sec">${esc(ETAPAS[x.etapa]?.[0] || x.etapa)}${x.prazo ? " · prazo " + dBR(x.prazo) : ""}${x.responsavel ? " · " + esc(x.responsavel) : ""}</div></div>
+            <div class="sec">${esc(ETAPAS[x.etapa]?.[0] || x.etapa)}${x.prazo_ajuizar ? " · ajuizar até " + dBR(x.prazo_ajuizar) : ""}${x.prazo ? " · prescrição/prazo " + dBR(x.prazo) : ""}${x.responsavel ? " · " + esc(x.responsavel) : ""}</div></div>
             <div class="dir"><a class="btn btn-sec btn-peq" href="#fila">Ver na fila</a></div></div>`).join("")}</div>` : '<div class="vazio peq">Nenhuma ação deste cliente aguardando ajuizamento.</div>'}
         </div>
 
@@ -588,8 +605,11 @@ async function telaFila() {
   const filtroResp = S.filaResp || "";
   const vis = ativos.filter((x) => !filtroResp || x.responsavel === filtroResp);
   const peso = { urgente: 0, alta: 1, normal: 2 };
-  const ordenar = (a, b) => peso[a.prioridade] - peso[b.prioridade] || String(a.prazo || "9999").localeCompare(String(b.prazo || "9999")) || String(a.criado_em).localeCompare(String(b.criado_em));
+  const lim = (x) => [x.prazo_ajuizar, x.prazo].filter(Boolean).sort()[0] || "9999";
+  const ordenar = (a, b) => peso[a.prioridade] - peso[b.prioridade] || lim(a).localeCompare(lim(b)) || String(a.criado_em).localeCompare(String(b.criado_em));
   const vencendo = ativos.filter((x) => x.prazo && x.prazo <= somaDias(hoje, 15)).length;
+  const atrasadas = ativos.filter((x) => x.prazo_ajuizar && x.prazo_ajuizar < hoje).length;
+  const noLimite = ativos.filter((x) => x.prazo_ajuizar && x.prazo_ajuizar >= hoje && x.prazo_ajuizar <= somaDias(hoje, 2)).length;
   const resps = [...new Set(ativos.map((x) => x.responsavel).filter(Boolean))];
 
   const cartao = (x) => {
@@ -597,6 +617,7 @@ async function telaFila() {
     const pf = pendenciasFicha(c);
     const d = docs[x.cliente_id];
     const dias = x.prazo ? Math.round((new Date(x.prazo + "T12:00:00Z") - new Date(hoje + "T12:00:00Z")) / 864e5) : null;
+    const dAj = x.prazo_ajuizar ? Math.round((new Date(x.prazo_ajuizar + "T12:00:00Z") - new Date(hoje + "T12:00:00Z")) / 864e5) : null;
     const i = ORDEM_ETAPAS.indexOf(x.etapa);
     const drive = x.drive_url || c.drive_url;
     return `<div class="fila-card" data-fila="${x.id}">
@@ -604,7 +625,8 @@ async function telaFila() {
       <a class="fila-nome" href="#cliente/${x.cliente_id}">${esc(c.nome || "Cliente")}</a>
       <div class="fila-tit">${esc(x.titulo)}</div>
       <div class="fila-info">
-        ${x.prazo ? `<span style="${dias <= 7 ? "color:var(--err);font-weight:700" : dias <= 15 ? "color:var(--warn);font-weight:600" : ""}">Prazo ${dBR(x.prazo)}${dias < 0 ? " (vencido)" : dias === 0 ? " (hoje)" : ` (${dias} dia${dias === 1 ? "" : "s"})`}</span>` : ""}
+        ${x.prazo_ajuizar ? `<span style="${dAj < 0 ? "color:var(--err);font-weight:700" : dAj <= 2 ? "color:var(--warn);font-weight:700" : ""}">Ajuizar até ${dBR(x.prazo_ajuizar)}${dAj < 0 ? ` (atrasada ${-dAj} dia${dAj === -1 ? "" : "s"})` : dAj === 0 ? " (hoje)" : ` (${dAj} dia${dAj === 1 ? "" : "s"})`}</span>` : ""}
+        ${x.prazo ? `<span style="${dias <= 7 ? "color:var(--err);font-weight:700" : dias <= 15 ? "color:var(--warn);font-weight:600" : ""}">Prescrição/prazo ${dBR(x.prazo)}${dias < 0 ? " (vencido)" : dias === 0 ? " (hoje)" : ` (${dias} dia${dias === 1 ? "" : "s"})`}</span>` : ""}
         <span class="${pf.length ? "falta" : "ok"}">${pf.length ? "Ficha: falta " + esc(pf.join(", ")) : "Ficha completa"}</span>
         <span class="${d && d.ok < d.tot ? "falta" : d ? "ok" : "mudo"}">${d ? `Documentos: ${d.ok} de ${d.tot} entregues` : "Sem lista de documentos"}</span>
         <span class="${drive ? "ok" : "falta"}">${drive ? "Pasta no Drive vinculada" : "Sem pasta no Drive"}</span>
@@ -622,7 +644,7 @@ async function telaFila() {
 
   app.innerHTML = `
   <div class="wrap-largo painel-corpo">
-    <div class="barra"><div><h1>Fila de ajuizamento</h1><p class="mudo peq">${ativos.length} ${ativos.length === 1 ? "ação" : "ações"} na fila${vencendo ? ` · <b style="color:var(--err)">${vencendo} com prazo em até 15 dias</b>` : ""}</p></div>
+    <div class="barra"><div><h1>Fila de ajuizamento</h1><p class="mudo peq">${ativos.length} ${ativos.length === 1 ? "ação" : "ações"} na fila · compromisso de ajuizar em até 10 dias${atrasadas ? ` · <b style="color:var(--err)">${atrasadas} atrasada${atrasadas === 1 ? "" : "s"}</b>` : ""}${noLimite ? ` · <b style="color:var(--warn)">${noLimite} no limite</b>` : ""}${vencendo ? ` · <b style="color:var(--err)">${vencendo} com prescrição/prazo em até 15 dias</b>` : ""}</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${resps.length > 1 || filtroResp ? `<select id="f-resp" aria-label="Responsável" style="width:auto"><option value="">Todos</option>${resps.map((r) => `<option ${r === filtroResp ? "selected" : ""}>${esc(r)}</option>`).join("")}</select>` : ""}
         <button class="btn btn-primario" id="nova-fila">+ Nova ação na fila</button></div></div>
@@ -677,8 +699,9 @@ function dialogoFila(x, depois) {
     </div>
     <div class="linha2">
       <div class="campo"><label for="fl-pri">Prioridade</label><select id="fl-pri" name="prioridade">${Object.entries(PRIORIDADES).map(([k, p]) => `<option value="${k}" ${(x.prioridade || "normal") === k ? "selected" : ""}>${p[0]}</option>`).join("")}</select></div>
-      <div class="campo"><label for="fl-prazo">Prazo limite</label><input id="fl-prazo" name="prazo" type="date" value="${esc(x.prazo || "")}"><span class="dica">Prescrição, decadência ou data combinada.</span></div>
+      <div class="campo"><label for="fl-prazo">Prescrição ou prazo externo</label><input id="fl-prazo" name="prazo" type="date" value="${esc(x.prazo || "")}"><span class="dica">Prescrição, decadência ou data combinada.</span></div>
     </div>
+    <div class="campo"><label for="fl-aj">Ajuizar até</label><input id="fl-aj" name="prazo_ajuizar" type="date" value="${esc(x.prazo_ajuizar || "")}"><span class="dica">${novo ? "Vazio: 10 dias a partir de hoje." : "Compromisso interno de 10 dias."}</span></div>
     <div class="campo"><label for="fl-resp">Responsável</label><input id="fl-resp" name="responsavel" type="text" list="fl-resps" value="${esc(x.responsavel ?? (novo ? eu : ""))}">
       <datalist id="fl-resps"><option value="Charles"></option><option value="Elmo"></option></datalist></div>
     <div class="campo"><label for="fl-drive">Pasta do caso no Google Drive (link)</label><input id="fl-drive" name="drive_url" type="url" value="${esc(x.drive_url || "")}" placeholder="${c0?.drive_url ? "Vazio: usa a pasta do cliente" : "https://drive.google.com/drive/folders/..."}"></div>
@@ -698,7 +721,7 @@ function dialogoFila(x, depois) {
       c = rc.data;
     }
     const dados = { cliente_id: c.id, titulo, area: val(f, "area") || null, etapa: val(f, "etapa"), prioridade: val(f, "prioridade"),
-      prazo: val(f, "prazo") || null, responsavel: val(f, "responsavel") || null, drive_url: drive || null, observacoes: val(f, "observacoes") || null };
+      prazo: val(f, "prazo") || null, ...(val(f, "prazo_ajuizar") || !novo ? { prazo_ajuizar: val(f, "prazo_ajuizar") || null } : {}), responsavel: val(f, "responsavel") || null, drive_url: drive || null, observacoes: val(f, "observacoes") || null };
     const r = novo ? await db.from("fila").insert(dados).select().single() : await db.from("fila").update(dados).eq("id", x.id).select().single();
     if (r.error) return toast(r.error.message, true);
     dlg.close(); toast(novo ? "Ação incluída na fila." : "Fila atualizada.");
