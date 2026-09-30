@@ -27,10 +27,11 @@
     <button class="aba" role="tab" data-rota="agenda">Agenda</button>
     <button class="aba" role="tab" data-rota="clientes">Clientes</button>
     <button class="aba" role="tab" data-rota="fila">Fila</button>
+    <button class="aba" role="tab" data-rota="movimentacoes">Movimentações</button>
     <button class="aba" role="tab" data-rota="publicacoes">Publicações</button>
     <button class="aba" role="tab" data-rota="calculos">Cálculos</button>
     <button class="aba" role="tab" data-rota="honorarios">Honorários</button>
-    <button class="aba" role="tab" data-rota="envios">Avisos enviados</button>
+    <button class="aba" role="tab" data-rota="envios">Avisos</button>
   </div>
 </nav>
 <main id="app"><div class="carregando">Carregando...</div></main>
@@ -134,6 +135,7 @@ function rotear() {
   if (rota === "publicacoes") return telaPublicacoes();
   if (rota === "calculos") return telaCalculos();
   if (rota === "fila") return telaFila();
+  if (rota === "movimentacoes") return telaMovimentacoes();
   if (rota === "envios") return telaEnvios();
   return telaResumo();
 }
@@ -208,13 +210,14 @@ async function telaResumo() {
   const hoje = HOJE();
   const iniHoje = isoDeBrasilia(hoje, "00:00");
   const fim7 = isoDeBrasilia(somaDias(hoje, 7), "23:59");
-  const [ev, hon, par, docs, pubs, fil, ale] = await Promise.all([
+  const [ev, hon, par, docs, pubs, fil, movn, ale] = await Promise.all([
     db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", iniHoje).lte("data_hora", fim7).order("data_hora", { ascending: true }),
     db.from("honorarios").select("*"),
     db.from("parcelas").select("*").order("vencimento", { ascending: true }),
     db.from("documentos").select("*"),
     db.from("publicacoes").select("id").eq("lida", false),
     db.from("fila").select("id,prazo,prazo_ajuizar").neq("etapa", "ajuizado"),
+    db.from("movimentos").select("processo_id").eq("lida", false).limit(5000),
     db.from("atendimento_alertas").select("*").is("resolvido_em", null).order("criado_em", { ascending: false }).limit(30),
   ]);
   const alertasAt = ale.error ? [] : ale.data;
@@ -253,6 +256,7 @@ async function telaResumo() {
     <div class="barra"><div><h1>${saudacao()}, ${esc(primeiroNome(S.advogado.nome))}.</h1><p class="mudo peq">${esc(dataLonga(new Date().toISOString()))}</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="r-cli">+ Novo cliente</button><button class="btn btn-primario" id="r-ev">+ Lançar evento</button></div></div>
     <div class="cards">
+      <a class="card-num ${movn.data?.length ? "aviso" : ""}" href="#movimentacoes"><div class="n">${movn.error ? "-" : new Set(movn.data.map((m) => m.processo_id)).size}</div><div class="l">processos com movimentação nova no tribunal</div></a>
       <a class="card-num ${naoLidas ? "aviso" : ""}" href="#publicacoes"><div class="n">${naoLidas}</div><div class="l">publicações novas do DJEN</div></a>
       <a class="card-num ${filaPrazo ? "alerta" : ""}" href="#fila"><div class="n">${naFila.length}</div><div class="l">ações na fila de ajuizamento${filaPrazo ? ` (${filaPrazo} no limite ou atrasada${filaPrazo === 1 ? "" : "s"})` : ""}</div></a>
       <a class="card-num ${alertasAt.length ? "alerta" : ""}" href="#resumo" data-ir-alertas><div class="n">${alertasAt.length}</div><div class="l">pedidos do atendimento online</div></a>
@@ -497,7 +501,7 @@ async function telaCliente(id) {
               <div class="cab">
                 <div><div style="margin-bottom:4px">${tagArea(p.area) || '<span class="tag tag-oculto">sem área</span>'}</div><h3>${esc(p.titulo)}${p.arquivado ? ' <span class="tag tag-oculto">encerrado</span>' : ""}</h3>
                   <div class="sec peq mudo">${[p.numero && "nº " + esc(p.numero), p.juizo && esc(p.juizo), p.parte_contraria && "x " + esc(p.parte_contraria)].filter(Boolean).join(" · ") || "sem número"}</div>
-                  <span class="situacao">${esc(p.situacao)}</span>${p.valor_causa ? ` <span class="peq mudo">· valor da causa ${moeda(p.valor_causa)}</span>` : ""}</div>
+                  <span class="situacao">${esc(p.situacao)}</span>${p.ultima_mov_em ? `<div class="peq" style="margin-top:6px"><span class="mudo">Tribunal, ${dataBR(p.ultima_mov_em)}:</span> ${esc(p.ultima_mov || "")}</div>` : ""}${p.valor_causa ? ` <span class="peq mudo">· valor da causa ${moeda(p.valor_causa)}</span>` : ""}</div>
                 <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
                   <button class="btn btn-primario btn-peq" data-novo-ev="${p.id}">+ Evento</button>
                   <button class="btn btn-sec btn-peq" data-calc-proc="${p.id}">Calcular</button>
@@ -1305,6 +1309,131 @@ async function planilhaCalculo(C) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Cálculo");
   XLSX.writeFile(wb, "calculo-" + norm(tituloCalculo(C)).replace(/[^a-z0-9]+/g, "-").slice(0, 60) + ".xlsx");
+}
+
+// ================= MOVIMENTAÇÕES DOS TRIBUNAIS (DataJud) =================
+const NOME_TRIB = (n) => {
+  const d = String(n || "").replace(/\D/g, "");
+  if (d.length !== 20) return "";
+  const j = d[13], tr = d.slice(14, 16);
+  if (j === "8") return { "24": "TJSC", "16": "TJPR", "21": "TJRS", "26": "TJSP" }[tr] || "TJ";
+  if (j === "4") return "TRF" + Number(tr);
+  if (j === "5") return "TRT" + Number(tr);
+  return "";
+};
+async function telaMovimentacoes() {
+  app.innerHTML = '<div class="carregando">Carregando movimentações...</div>';
+  await recarregarBase();
+  const [nq, rq] = await Promise.all([
+    db.from("movimentos").select("processo_id").eq("lida", false).limit(5000),
+    db.from("datajud_requisicoes").select("*").order("criado_em", { ascending: false }).limit(30),
+  ]);
+  if (nq.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc(nq.error.message)}. Confira se o script 12 (DataJud) foi executado no Supabase.</div></div>`);
+  const novas = {};
+  nq.data.forEach((m) => (novas[m.processo_id] = (novas[m.processo_id] || 0) + 1));
+  const reqs = rq.data || [];
+  const ult = reqs[0];
+  const lote = ult ? reqs.filter((r) => Math.abs(new Date(r.criado_em) - new Date(ult.criado_em)) < 120000) : [];
+  const falhas = lote.filter((r) => r.processado && r.status !== 200);
+  const pend = lote.filter((r) => !r.processado).length;
+  const status = !ult ? "Nenhuma consulta feita ainda."
+    : `Última consulta: ${dataBR(ult.criado_em)} ${horaBR(ult.criado_em)} · ${lote.length - falhas.length - pend} de ${lote.length} tribunal(is) responderam${pend ? `, ${pend} aguardando` : ""}${falhas.length ? ` · falhou: ${falhas.map((f) => f.tribunal.toUpperCase() + " (" + (f.status || "sem resposta") + ")").join(", ")}` : ""}`;
+  const chaveRecusada = falhas.some((f) => f.status === 401 || f.status === 403);
+  const filtro = S.filtroMov || "novas";
+  const comNumero = S.processos.filter((p) => !p.arquivado && String(p.numero || "").replace(/\D/g, "").length === 20);
+  app.innerHTML = `
+  <div class="wrap-largo painel-corpo">
+    <div class="barra"><div><h1>Movimentações dos tribunais</h1>
+      <p class="mudo peq">Consulta automática às 7h e às 13h na base oficial do CNJ (DataJud), para os ${comNumero.length} processos ativos com número. Processos em segredo de justiça não aparecem, e a base costuma ter alguns dias de atraso.</p>
+      <p class="peq ${falhas.length ? "" : "mudo"}" style="${falhas.length ? "color:var(--err)" : ""}">${esc(status)}</p>
+      ${chaveRecusada ? `<div class="aviso aviso-erro peq" style="margin-top:6px">O CNJ recusou a chave de acesso. Abra <a href="https://datajud-wiki.cnj.jus.br/api-publica/acesso/" target="_blank" rel="noopener">datajud-wiki.cnj.jus.br/api-publica/acesso</a>, copie a chave pública e cole em "Chave do DataJud".</div>` : ""}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="dj-chave">Chave do DataJud</button><button class="btn btn-primario" id="dj-buscar">Buscar agora</button></div></div>
+    <div class="barra">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1"><input type="search" id="dj-busca" placeholder="Buscar por cliente, título ou número" aria-label="Buscar" style="max-width:340px">
+      <select id="dj-filtro" style="max-width:260px" aria-label="Filtro"><option value="novas">Com movimentação nova</option><option value="todas">Todos, pela última movimentação</option><option value="sem">Sem dados no DataJud</option></select></div>
+      ${Object.keys(novas).length ? '<button class="btn btn-sec btn-peq" id="dj-ler-todas">Marcar todas como vistas</button>' : ""}
+    </div>
+    <div class="lista" id="dj-lista"></div>
+  </div>`;
+  const lista = app.querySelector("#dj-lista"), busca = app.querySelector("#dj-busca"), sel = app.querySelector("#dj-filtro");
+  sel.value = filtro;
+  const desenhar = () => {
+    const q = norm(busca.value), qd = q.replace(/\D/g, "");
+    let l = comNumero.filter((p) => {
+      if (sel.value === "novas" && !novas[p.id]) return false;
+      if (sel.value === "sem" && p.datajud_em) return false;
+      if (!q) return true;
+      const c = S.cli[p.cliente_id];
+      return norm(p.titulo).includes(q) || norm(c?.nome).includes(q) || (qd.length >= 4 && String(p.numero).replace(/\D/g, "").includes(qd));
+    });
+    l.sort((a, b) => String(b.ultima_mov_em || "").localeCompare(String(a.ultima_mov_em || "")));
+    lista.innerHTML = l.length ? l.slice(0, 400).map((p) => {
+      const c = S.cli[p.cliente_id];
+      return `<div class="mov-linha" data-proc="${p.id}">
+        <div class="mov-proc"><b>${esc(c?.nome || "")}</b> ${tagArea(p.area)}
+          <div class="sec">${esc(p.titulo)}</div>
+          <div class="sec"><span class="tag tag-oculto">${NOME_TRIB(p.numero)}</span> ${esc(p.numero)}</div></div>
+        <div class="mov-ult">${p.ultima_mov_em ? `<span class="peq mudo">${dataBR(p.ultima_mov_em)}</span> ${novas[p.id] ? `<span class="tag tag-prazo">${novas[p.id]} nova${novas[p.id] === 1 ? "" : "s"}</span>` : ""}<div>${esc(p.ultima_mov || "")}</div>` : `<span class="peq mudo">${p.datajud_em ? "sem movimentação" : "ainda sem dados no DataJud"}</span>`}
+          ${p.tribunal_orgao || p.tribunal_classe ? `<div class="sec">${esc([p.tribunal_classe, p.tribunal_orgao].filter(Boolean).join(" · "))}</div>` : ""}</div>
+        <div class="mov-bot"><button class="btn btn-sec btn-peq" data-ver-mov="${p.id}">Ver</button></div>
+        <div class="mov-det" id="det-${p.id}" hidden></div>
+      </div>`;
+    }).join("") : `<div class="vazio" style="border:0">${sel.value === "novas" ? "Nenhuma movimentação nova. Escolha \u201cTodos\u201d para ver a lista completa." : "Nenhum processo encontrado."}</div>`;
+    lista.querySelectorAll("[data-ver-mov]").forEach((b) => (b.onclick = () => verMovimentos(b.dataset.verMov, b)));
+  };
+  const verMovimentos = async (pid, botao) => {
+    const box = app.querySelector("#det-" + pid);
+    if (!box.hidden) { box.hidden = true; botao.textContent = "Ver"; return; }
+    box.hidden = false; botao.textContent = "Fechar"; box.innerHTML = '<div class="peq mudo">Carregando...</div>';
+    const r = await db.from("movimentos").select("*").eq("processo_id", pid).order("data_hora", { ascending: false }).limit(20);
+    if (r.error) { box.innerHTML = `<div class="aviso aviso-erro">${esc(r.error.message)}</div>`; return; }
+    const p = S.proc[pid];
+    box.innerHTML = r.data.length ? `<ol class="mov-tl">${r.data.map((m) => `<li class="${m.lida ? "" : "nova"}"><span class="quando">${m.data_hora ? dataBR(m.data_hora) + " " + horaBR(m.data_hora) : ""}${m.grau ? " · " + esc(m.grau) : ""}</span>
+        <b>${esc(m.nome || "")}</b>${m.complemento ? ` <span class="mudo">(${esc(m.complemento)})</span>` : ""}
+        <button class="mais" style="padding:0 0 0 8px" data-cliente-mov="${m.id}">Mostrar ao cliente</button></li>`).join("")}</ol>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><a class="btn btn-sec btn-peq" href="#cliente/${p.cliente_id}">Abrir ficha</a>${novas[pid] ? `<button class="btn btn-sec btn-peq" data-vistas="${pid}">Marcar como vistas</button>` : ""}</div>`
+      : '<div class="peq mudo">Nenhuma movimentação recebida do DataJud para este processo.</div>';
+    box.querySelector("[data-vistas]")?.addEventListener("click", async () => {
+      const u = await db.from("movimentos").update({ lida: true }).eq("processo_id", pid).eq("lida", false);
+      if (u.error) return toast(u.error.message, true);
+      delete novas[pid]; toast("Marcadas como vistas."); desenhar();
+    });
+    box.querySelectorAll("[data-cliente-mov]").forEach((b2) => (b2.onclick = () => {
+      const m = r.data.find((x) => String(x.id) === b2.dataset.clienteMov);
+      dialogoEvento({ evento: { tipo: "andamento", titulo: m.nome + (m.complemento ? " (" + m.complemento + ")" : ""), descricao: "", visivel_cliente: true, notificar: true, processo_id: pid,
+        data_hora: m.data_hora }, escolherProcesso: false, depois: () => {} });
+      toast("Explique ao cliente, em linguagem simples, o que essa movimentação significa.");
+    }));
+  };
+  busca.addEventListener("input", desenhar);
+  sel.addEventListener("change", () => { S.filtroMov = sel.value; desenhar(); });
+  app.querySelector("#dj-ler-todas")?.addEventListener("click", async () => {
+    if (!confirm("Marcar todas as movimentações novas como vistas?")) return;
+    const u = await db.from("movimentos").update({ lida: true }).eq("lida", false);
+    if (u.error) return toast(u.error.message, true); telaMovimentacoes();
+  });
+  app.querySelector("#dj-buscar").onclick = async (e) => {
+    e.target.disabled = true;
+    const r1 = await db.rpc("datajud_buscar_agora");
+    if (r1.error) { e.target.disabled = false; return toast(r1.error.message, true); }
+    toast(`Consultando ${r1.data} grupo(s) de processos no DataJud... aguarde uns 30 segundos.`);
+    await new Promise((ok) => setTimeout(ok, 30000));
+    const r2 = await db.rpc("datajud_processar_agora");
+    if (r2.error) { e.target.disabled = false; return toast(r2.error.message, true); }
+    toast(r2.data ? `${r2.data} movimentação(ões) gravada(s).` : "Nenhuma movimentação nova nesta consulta.");
+    S.filtroMov = "todas"; telaMovimentacoes();
+  };
+  app.querySelector("#dj-chave").onclick = () => {
+    abrir(`<form novalidate><h2>Chave do DataJud</h2>
+      <p class="peq mudo" style="margin:-8px 0 12px">O CNJ publica uma chave pública e pode trocá-la sem aviso. Abra <a href="https://datajud-wiki.cnj.jus.br/api-publica/acesso/" target="_blank" rel="noopener">a página de acesso do DataJud</a>, copie a chave (o texto depois de "APIKey") e cole abaixo.</p>
+      <div class="campo"><label for="dj-k">Chave pública</label><input id="dj-k" name="chave" type="text" autocomplete="off" required></div>
+      <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div></div></form>`, async (f) => {
+      const r = await db.rpc("datajud_definir_chave", { p_chave: val(f, "chave") });
+      if (r.error) return toast(r.error.message, true);
+      dlg.close(); toast("Chave salva. Clique em Buscar agora.");
+    });
+  };
+  desenhar();
 }
 
 // ================= PUBLICAÇÕES (DJEN, pela OAB) =================
