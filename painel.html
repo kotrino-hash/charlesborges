@@ -27,6 +27,7 @@
     <button class="aba" role="tab" data-rota="agenda">Agenda</button>
     <button class="aba" role="tab" data-rota="clientes">Clientes</button>
     <button class="aba" role="tab" data-rota="publicacoes">Publicações</button>
+    <button class="aba" role="tab" data-rota="calculos">Cálculos</button>
     <button class="aba" role="tab" data-rota="honorarios">Honorários</button>
     <button class="aba" role="tab" data-rota="envios">Avisos enviados</button>
   </div>
@@ -39,7 +40,8 @@ import {
   db, configurado, esc, primeiroNome, NOME_TIPO, dataBR, horaBR, dataLonga, partesData, isoDeBrasilia, chaveDia,
   normalizaWhats, mostraWhats, linkWhats, PORTAL_URL, montarLogin, toast
 } from "./portal-comum.js";
-import { MODELOS, ESTADOS_CIVIS, montarDados, gerarDocx, moeda, dividirParcelas } from "./documentos.js";
+import { MODELOS, ESTADOS_CIVIS, montarDados, gerarDocx, moeda, dividirParcelas, reaisExtenso, inteiroExtenso } from "./documentos.js";
+import { prepararIndices, calcularPrevidenciario, calcularAtualizacao, REGIMES, JUROS, NOMES_INDICE, rotuloMes, smEm, mesDe } from "./calculos.js";
 
 const app = document.getElementById("app");
 const dlg = document.getElementById("dlg");
@@ -120,6 +122,7 @@ function rotear() {
   if (rota === "cliente" && id) return telaCliente(id);
   if (rota === "honorarios") return telaHonorarios();
   if (rota === "publicacoes") return telaPublicacoes();
+  if (rota === "calculos") return telaCalculos();
   if (rota === "envios") return telaEnvios();
   return telaResumo();
 }
@@ -434,9 +437,10 @@ async function telaCliente(id) {
               <div class="cab">
                 <div><h3>${esc(p.titulo)}${p.arquivado ? ' <span class="tag tag-oculto">encerrado</span>' : ""}</h3>
                   <div class="sec peq mudo">${[p.numero && "nº " + esc(p.numero), p.juizo && esc(p.juizo), p.parte_contraria && "x " + esc(p.parte_contraria)].filter(Boolean).join(" · ") || "sem número"}</div>
-                  <span class="situacao">${esc(p.situacao)}</span></div>
+                  <span class="situacao">${esc(p.situacao)}</span>${p.valor_causa ? ` <span class="peq mudo">· valor da causa ${moeda(p.valor_causa)}</span>` : ""}</div>
                 <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
                   <button class="btn btn-primario btn-peq" data-novo-ev="${p.id}">+ Evento</button>
+                  <button class="btn btn-sec btn-peq" data-calc-proc="${p.id}">Calcular</button>
                   <button class="btn btn-sec btn-peq" data-editar-proc="${p.id}">Editar</button>
                 </div>
               </div>
@@ -492,6 +496,12 @@ async function telaCliente(id) {
   }));
   app.querySelectorAll("[data-editar-proc]").forEach((b) => (b.onclick = () => dialogoProcesso(S.proc[b.dataset.editarProc])));
   app.querySelectorAll("[data-novo-ev]").forEach((b) => (b.onclick = () => dialogoEvento({ processo_id: b.dataset.novoEv, depois: recarregar })));
+  app.querySelectorAll("[data-calc-proc]").forEach((b) => (b.onclick = () => {
+    const pr = S.proc[b.dataset.calcProc];
+    const prev = /previd|inss|aposent|benef|aux[ií]lio|pens[aã]o|bpc|loas|maternidade|incapacidade/i.test([pr.titulo, pr.parte_contraria, pr.juizo].join(" "));
+    S.calcPreset = { aba: prev ? "causa" : "atualizacao", cliente_id: pr.cliente_id, processo_id: pr.id };
+    location.hash = "calculos";
+  }));
   app.querySelectorAll("[data-editar-hon]").forEach((b) => (b.onclick = () => dialogoHonorario(hons.find((h) => h.id === b.dataset.editarHon), recarregar)));
   app.querySelectorAll("[data-add-parc]").forEach((b) => (b.onclick = () => dialogoParcela(b.dataset.addParc, recarregar)));
   app.querySelectorAll("[data-pagar]").forEach((b) => (b.onclick = async () => { await marcarPago(b.dataset.pagar); recarregar(); }));
@@ -503,6 +513,466 @@ async function telaCliente(id) {
   ligarEventos(app, evs, recarregar);
 }
 
+
+// ================= CÁLCULOS =================
+let INDICES = null;
+async function carregarIndices(forcar = false) {
+  if (INDICES && !forcar) return INDICES;
+  const series = ["inpc", "ipca", "ipcae", "igpm", "selic", "fselic", "taxalegal", "sm"];
+  const rs = await Promise.all(series.map((s) => db.from("indices").select("serie,competencia,valor").eq("serie", s).order("competencia", { ascending: true }).range(0, 999)));
+  const e = rs.find((r) => r.error);
+  if (e) throw e.error;
+  INDICES = prepararIndices(rs.flatMap((r) => r.data));
+  return INDICES;
+}
+const ESPECIES = {
+  idade_rural: { nome: "Aposentadoria por idade rural", sm: true, d13: true, piso: true },
+  idade_urbana: { nome: "Aposentadoria por idade urbana", d13: true, piso: true },
+  programada: { nome: "Aposentadoria programada ou por tempo de contribuição", d13: true, piso: true },
+  incap_perm: { nome: "Aposentadoria por incapacidade permanente", d13: true, piso: true },
+  incap_temp: { nome: "Auxílio por incapacidade temporária", d13: true, piso: true },
+  acidente: { nome: "Auxílio-acidente", d13: true, piso: false },
+  pensao: { nome: "Pensão por morte", d13: true, piso: true },
+  reclusao: { nome: "Auxílio-reclusão", sm: true, d13: true, piso: true },
+  maternidade: { nome: "Salário-maternidade", sm: true, d13: true, piso: true, dias: 120 },
+  bpc: { nome: "Benefício assistencial (BPC/LOAS)", sm: true, d13: false, piso: true },
+  outro: { nome: "Outro benefício", d13: true, piso: true },
+};
+const ABAS_CALC = { causa: "Valor da causa previdenciário", atrasados: "Atrasados previdenciários", atualizacao: "Atualização de valores" };
+const pct = (v, casas = 4) => (Number(v) || 0).toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
+const numInput = (v) => (v === "" || v == null ? "" : Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+function paramsPadrao(aba) {
+  const hoje = HOJE();
+  if (aba === "atualizacao") return { aba, itens: [{ descricao: "", data: "", valor: "" }], dataFinal: hoje, regime: "lei14905", juros: "regime", jurosDesde: "", multa: "", honorarios: "" };
+  return { aba, modo: aba, especie: "idade_rural", dib: "", dcb: "", rmiModo: "sm", rmi: "", pisoSM: true, decimoTerceiro: true, prescricao: true,
+    vincendas: true, vincendas13: false, ajuizamento: hoje, citacao: "", dip: "", dataCalculo: hoje };
+}
+
+async function telaCalculos() {
+  S.calc ||= { aba: "causa", params: paramsPadrao("causa"), res: null, cliente_id: null, processo_id: null };
+  if (S.calcPreset) {
+    const pr = S.calcPreset; S.calcPreset = null;
+    S.calc = { aba: pr.aba || "causa", params: paramsPadrao(pr.aba || "causa"), res: null, cliente_id: pr.cliente_id || null, processo_id: pr.processo_id || null };
+  }
+  app.innerHTML = '<div class="carregando">Carregando índices...</div>';
+  let I;
+  try { I = await carregarIndices(); } catch (e) {
+    app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc(e.message || String(e))}. Confira se o script 08 (cálculos) foi executado no Supabase.</div></div>`;
+    return;
+  }
+  const C = S.calc, p = C.params;
+  const cli = C.cliente_id ? S.cli[C.cliente_id] : null;
+  const procsCli = cli ? S.processos.filter((x) => x.cliente_id === cli.id) : [];
+  const ultInpc = I.ultimo.inpc != null ? rotuloMes(I.ultimo.inpc) : "sem dados";
+  const ultIpca = I.ultimo.ipca != null ? rotuloMes(I.ultimo.ipca) : "sem dados";
+  const ultTl = I.ultimo.taxalegal != null ? rotuloMes(I.ultimo.taxalegal) : "sem dados";
+  const chk = (nome, rot, v, dica = "") => `<label class="check"><input type="checkbox" name="${nome}" ${v ? "checked" : ""}><span>${rot}${dica ? `<br><span class="peq mudo">${dica}</span>` : ""}</span></label>`;
+  const data = (nome, rot, v, dica = "", req = false) => `<div class="campo"><label for="c-${nome}">${rot}</label><input id="c-${nome}" name="${nome}" type="date" value="${esc(v || "")}" ${req ? "required" : ""}>${dica ? `<span class="dica">${dica}</span>` : ""}</div>`;
+
+  let form = "";
+  if (C.aba !== "atualizacao") {
+    const at = C.aba === "atrasados";
+    form = `
+      <div class="campo"><label for="c-especie">Benefício</label><select id="c-especie" name="especie">${Object.entries(ESPECIES).map(([k, e]) => `<option value="${k}" ${p.especie === k ? "selected" : ""}>${e.nome}</option>`).join("")}</select></div>
+      <div class="linha2">${data("dib", "DIB (data de início)", p.dib, "Normalmente a DER.", true)}${data("dcb", "Data de cessação", p.dcb, "Só se o benefício tem fim.")}</div>
+      <fieldset><legend>Valor do benefício</legend>
+        <label class="check"><input type="radio" name="rmiModo" value="sm" ${p.rmiModo === "sm" ? "checked" : ""}><span>Um salário mínimo (acompanha o mínimo de cada ano)</span></label>
+        <label class="check"><input type="radio" name="rmiModo" value="valor" ${p.rmiModo === "valor" ? "checked" : ""}><span>Renda mensal inicial informada, reajustada pelo INPC a cada janeiro</span></label>
+        <div class="campo" id="c-rmi-campo" ${p.rmiModo === "valor" ? "" : "hidden"}><label for="c-rmi">RMI na DIB (R$)</label><input id="c-rmi" name="rmi" type="text" inputmode="decimal" value="${esc(numInput(p.rmi))}" placeholder="0,00"></div>
+      </fieldset>
+      <div class="linha2">${data("ajuizamento", "Data do ajuizamento", p.ajuizamento, at ? "Para a prescrição quinquenal." : "", true)}
+        ${at ? data("citacao", "Data da citação", p.citacao, "Termo inicial dos juros.") : "<div></div>"}</div>
+      ${at ? `<div class="linha2">${data("dip", "DIP (início do pagamento pelo INSS)", p.dip, "Parcelas vão até o dia anterior.")}${data("dataCalculo", "Atualizar até", p.dataCalculo, "", true)}</div>` : ""}
+      ${chk("decimoTerceiro", "Incluir o 13º salário (abono anual)", p.decimoTerceiro)}
+      ${chk("pisoSM", "Respeitar o piso do salário mínimo", p.pisoSM, "Desmarque no auxílio-acidente.")}
+      ${chk("prescricao", "Aplicar a prescrição quinquenal", p.prescricao, "Afasta parcelas anteriores aos 5 anos do ajuizamento.")}
+      ${at ? "" : chk("vincendas", "Somar as 12 parcelas vincendas (art. 292, §§ 1º e 2º, do CPC)", p.vincendas) + chk("vincendas13", "Incluir o 13º nas vincendas", p.vincendas13)}`;
+  } else {
+    form = `
+      <div class="campo"><label>Valores a atualizar</label>
+        <div id="c-itens">${p.itens.map((it, i) => `
+          <div class="item-calc" data-i="${i}">
+            <input type="text" name="desc${i}" value="${esc(it.descricao)}" placeholder="Descrição (opcional)" aria-label="Descrição">
+            <input type="date" name="data${i}" value="${esc(it.data)}" aria-label="Data do valor">
+            <input type="text" name="valor${i}" inputmode="decimal" value="${esc(numInput(it.valor))}" placeholder="0,00" aria-label="Valor">
+            <button type="button" class="x" data-rem="${i}" title="Remover" aria-label="Remover">×</button>
+          </div>`).join("")}</div>
+        <button type="button" class="btn btn-sec btn-peq" id="c-add" style="justify-self:start">+ Outro valor</button></div>
+      ${data("dataFinal", "Atualizar até", p.dataFinal, "", true)}
+      <div class="campo"><label for="c-regime">Correção monetária</label><select id="c-regime" name="regime">${Object.entries(REGIMES).map(([k, t]) => `<option value="${k}" ${p.regime === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+      <div class="linha2"><div class="campo"><label for="c-juros">Juros de mora</label><select id="c-juros" name="juros">${Object.entries(JUROS).map(([k, t]) => `<option value="${k}" ${p.juros === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+        ${data("jurosDesde", "Juros a partir de", p.jurosDesde, "Citação ou evento. Vazio: data de cada valor.")}</div>
+      <div class="linha2"><div class="campo"><label for="c-multa">Multa (%)</label><input id="c-multa" name="multa" type="text" inputmode="decimal" value="${esc(p.multa)}" placeholder="Ex.: 10 (art. 523, § 1º, do CPC)"></div>
+        <div class="campo"><label for="c-hon">Honorários (%)</label><input id="c-hon" name="honorarios" type="text" inputmode="decimal" value="${esc(p.honorarios)}" placeholder="Ex.: 10"></div></div>`;
+  }
+
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <div class="barra"><div><h1>Cálculos</h1><p class="mudo peq">Índices do Banco Central: INPC até ${ultInpc}, IPCA até ${ultIpca}, taxa legal até ${ultTl}, salário mínimo de ${moeda(smEm(mesDe(HOJE())))}. Atualizam sozinhos todo dia às 7h40.</p></div>
+      <button class="btn btn-sec btn-peq" id="c-atualizar-idx">Buscar índices agora</button></div>
+    <div class="seg" role="tablist">${Object.entries(ABAS_CALC).map(([k, t]) => `<button type="button" role="tab" aria-selected="${C.aba === k}" data-calc-aba="${k}">${t}</button>`).join("")}</div>
+    <div class="calc">
+      <form class="cartao" id="c-form" novalidate>
+        <div class="linha2">
+          <div class="campo"><label for="c-cli">Cliente (opcional)</label><input id="c-cli" type="search" list="c-cli-lista" autocomplete="off" value="${esc(cli?.nome || "")}" placeholder="Digite o nome">
+            <datalist id="c-cli-lista">${S.clientes.map((x) => `<option value="${esc(x.nome)}"></option>`).join("")}</datalist></div>
+          <div class="campo"><label for="c-proc">Processo</label><select id="c-proc" ${procsCli.length ? "" : "disabled"}><option value="">${procsCli.length ? "Nenhum" : "Escolha o cliente"}</option>
+            ${procsCli.map((x) => `<option value="${x.id}" ${C.processo_id === x.id ? "selected" : ""}>${esc(x.titulo)}${x.numero ? " · " + esc(x.numero) : ""}</option>`).join("")}</select></div>
+        </div>
+        ${form}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"><button type="submit" class="btn btn-primario">Calcular</button><button type="button" class="btn btn-sec" id="c-limpar">Limpar</button></div>
+      </form>
+      <div id="c-res">${C.res ? resultadoHTML(C) : `<div class="vazio">Preencha os dados e clique em Calcular.<br><span class="peq">${C.aba === "atualizacao" ? "Correção e juros conforme o índice escolhido, com memória de cálculo." : "Regras do Manual de Cálculos da Justiça Federal (Resolução CJF 990/2026)."}</span></div>`}</div>
+    </div>
+    <div class="bloco" style="margin-top:28px"><div class="barra"><h2>Cálculos salvos</h2></div><div id="c-salvos"><div class="carregando" style="padding:20px">Carregando...</div></div></div>
+  </div>`;
+
+  const f = app.querySelector("#c-form");
+  const lerForm = () => {
+    const q = {};
+    if (C.aba === "atualizacao") {
+      q.itens = p.itens.map((_, i) => ({ descricao: val(f, "desc" + i), data: val(f, "data" + i), valor: numBR(val(f, "valor" + i)) }));
+      Object.assign(q, { dataFinal: val(f, "dataFinal"), regime: val(f, "regime"), juros: val(f, "juros"), jurosDesde: val(f, "jurosDesde"),
+        multa: val(f, "multa").replace(",", "."), honorarios: val(f, "honorarios").replace(",", ".") });
+    } else {
+      Object.assign(q, { modo: C.aba, especie: val(f, "especie"), dib: val(f, "dib"), dcb: val(f, "dcb"), rmiModo: f.querySelector("[name=rmiModo]:checked").value,
+        rmi: numBR(val(f, "rmi")), ajuizamento: val(f, "ajuizamento"), citacao: val(f, "citacao"), dip: val(f, "dip"), dataCalculo: val(f, "dataCalculo") || HOJE() });
+      for (const k of ["decimoTerceiro", "pisoSM", "prescricao", "vincendas", "vincendas13"]) q[k] = f.elements[k] ? f.elements[k].checked : false;
+    }
+    q.aba = C.aba;
+    return q;
+  };
+  const guardar = () => { C.params = lerForm(); };
+
+  // cliente e processo
+  const inCli = app.querySelector("#c-cli");
+  inCli.onchange = () => {
+    guardar();
+    const c = S.clientes.find((x) => norm(x.nome) === norm(inCli.value));
+    C.cliente_id = c ? c.id : null; C.processo_id = null;
+    telaCalculos();
+  };
+  app.querySelector("#c-proc").onchange = (e) => { C.processo_id = e.target.value || null; };
+  app.querySelectorAll("[data-calc-aba]").forEach((b) => (b.onclick = () => {
+    if (b.dataset.calcAba === C.aba) return;
+    guardar();
+    const destinoPrev = b.dataset.calcAba !== "atualizacao", origemPrev = C.aba !== "atualizacao";
+    C.params = destinoPrev && origemPrev ? { ...C.params, modo: b.dataset.calcAba, aba: b.dataset.calcAba } : paramsPadrao(b.dataset.calcAba);
+    C.aba = b.dataset.calcAba; C.res = null; C.salvoId = null;
+    telaCalculos();
+  }));
+  app.querySelector("#c-limpar").onclick = () => { C.params = paramsPadrao(C.aba); C.res = null; C.salvoId = null; telaCalculos(); };
+  app.querySelector("#c-atualizar-idx").onclick = async (e) => {
+    e.target.disabled = true;
+    const r1 = await db.rpc("indices_atualizar_agora");
+    if (r1.error) { e.target.disabled = false; return toast(r1.error.message, true); }
+    toast("Consultando o Banco Central... aguarde alguns segundos.");
+    await new Promise((ok) => setTimeout(ok, 12000));
+    const r2 = await db.rpc("indices_processar_agora");
+    if (r2.error) { e.target.disabled = false; return toast(r2.error.message, true); }
+    guardar(); await carregarIndices(true); toast("Índices atualizados."); telaCalculos();
+  };
+  if (C.aba !== "atualizacao") {
+    f.querySelectorAll("[name=rmiModo]").forEach((r) => (r.onchange = () => (app.querySelector("#c-rmi-campo").hidden = r.value !== "valor" || !r.checked)));
+    f.elements.especie.onchange = () => {
+      const e = ESPECIES[f.elements.especie.value];
+      f.elements.decimoTerceiro.checked = e.d13; f.elements.pisoSM.checked = e.piso;
+      f.querySelector(`[name=rmiModo][value=${e.sm ? "sm" : "valor"}]`).checked = true;
+      app.querySelector("#c-rmi-campo").hidden = !!e.sm;
+      if (e.dias && f.elements.dib.value && !f.elements.dcb.value) f.elements.dcb.value = somaDias(f.elements.dib.value, e.dias - 1);
+    };
+    f.elements.dib.onchange = () => {
+      const e = ESPECIES[f.elements.especie.value];
+      if (e.dias && f.elements.dib.value) f.elements.dcb.value = somaDias(f.elements.dib.value, e.dias - 1);
+    };
+  } else {
+    app.querySelector("#c-add").onclick = () => { guardar(); C.params.itens.push({ descricao: "", data: "", valor: "" }); telaCalculos(); };
+    app.querySelectorAll("[data-rem]").forEach((b) => (b.onclick = () => {
+      guardar(); C.params.itens.splice(Number(b.dataset.rem), 1);
+      if (!C.params.itens.length) C.params.itens.push({ descricao: "", data: "", valor: "" });
+      telaCalculos();
+    }));
+  }
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const q = lerForm();
+    let erro = "";
+    if (C.aba === "atualizacao") {
+      if (!q.itens.some((it) => it.data && it.valor)) erro = "Informe ao menos um valor com a respectiva data.";
+      else if (!q.dataFinal) erro = "Informe a data até quando atualizar.";
+      else if (q.itens.some((it) => it.data && it.data > q.dataFinal)) erro = "Há valor com data posterior à data da atualização.";
+    } else {
+      if (!q.dib) erro = "Informe a DIB.";
+      else if (!q.ajuizamento) erro = "Informe a data do ajuizamento.";
+      else if (q.rmiModo === "valor" && !q.rmi) erro = "Informe a RMI.";
+      else if (q.dcb && q.dcb < q.dib) erro = "A cessação não pode ser anterior à DIB.";
+      else if (C.aba === "causa" && q.dib >= q.ajuizamento) erro = "A DIB é posterior ao ajuizamento: não há parcelas vencidas.";
+      else if (C.aba === "atrasados" && q.dip && q.dip < q.dib) erro = "A DIP não pode ser anterior à DIB.";
+    }
+    if (erro) return toast(erro, true);
+    C.params = q; C.salvoId = null;
+    C.res = C.aba === "atualizacao" ? calcularAtualizacao(q, I) : calcularPrevidenciario(q, I);
+    telaCalculos();
+    setTimeout(() => app.querySelector("#c-res")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  });
+  if (C.res) ligarResultado(C);
+  listarCalculosSalvos();
+}
+
+function textoPeticao(C) {
+  const r = C.res, p = C.params;
+  if (r.tipo === "atualizacao") {
+    const t = r.totais;
+    const partes = [];
+    if (t.multa) partes.push(`multa de ${String(p.multa).replace(".", ",")}%, no importe de ${moeda(t.multa)}`);
+    if (t.honorarios) partes.push(`honorários de ${String(p.honorarios).replace(".", ",")}%, no importe de ${moeda(t.honorarios)}`);
+    return `O débito, atualizado até ${dBR(r.dataCalculo)}, perfaz ${moeda(t.total)} (${reaisExtenso(t.total)}), dos quais ${moeda(t.corrigido)} correspondem ao principal corrigido${t.juros ? ` e ${moeda(t.juros)} aos juros de mora` : ""}${partes.length ? `, acrescidos de ${partes.join(", e de ")}` : ""}, conforme memória de cálculo anexa.`;
+  }
+  if (r.modo === "atrasados") {
+    return `O montante das parcelas vencidas de ${dBR(r.periodo.inicio)} a ${dBR(r.periodo.fim)}, atualizado até ${dBR(r.dataCalculo)} segundo o Manual de Cálculos da Justiça Federal, perfaz ${moeda(r.total)} (${reaisExtenso(r.total)}), sendo ${moeda(r.vencidas.corrigido)} de principal corrigido e ${moeda(r.vencidas.juros)} de juros de mora, conforme memória de cálculo anexa.`;
+  }
+  const v = r.vincendas;
+  let txt = `Atribui-se à causa o valor de ${moeda(r.total)} (${reaisExtenso(r.total)}), correspondente à soma das parcelas vencidas desde ${dBR(r.periodo.inicio)}${p.decimoTerceiro ? ", acrescidas do abono anual," : ""} corrigidas monetariamente segundo o Manual de Cálculos da Justiça Federal, no importe de ${moeda(r.vencidas.total)}`;
+  const nv = v ? v.parcelas + v.decimo : 0;
+  const qtd = nv === 1 ? "da parcela vincenda" : `das ${nv === 2 ? "duas" : inteiroExtenso(nv)} parcelas vincendas`;
+  txt += v && v.total ? `, e ${qtd}, no importe de ${moeda(v.total)}, na forma do art. 292, §§ 1º e 2º, do Código de Processo Civil` : ", na forma do art. 292, § 1º, do Código de Processo Civil";
+  txt += ", conforme memória de cálculo anexa.";
+  if (r.excedeJEF) txt += `\n\nA parte autora renuncia expressamente ao valor que excede sessenta salários mínimos na data do ajuizamento (${moeda(r.tetoJEF)}), para fins de fixação da competência do Juizado Especial Federal, nos termos do art. 3º da Lei nº 10.259/2001.`;
+  return txt;
+}
+
+function resultadoHTML(C) {
+  const r = C.res;
+  const cli = C.cliente_id ? S.cli[C.cliente_id] : null;
+  const proc = C.processo_id ? S.proc[C.processo_id] : null;
+  const avisos = r.avisos.length ? `<div class="aviso aviso-info peq">${r.avisos.map(esc).join("<br>")}</div>` : "";
+  const botoes = `<div class="calc-botoes">
+    <button class="btn btn-primario btn-peq" id="c-salvar">${C.salvoId ? "Salvo" : "Salvar cálculo"}</button>
+    ${proc && r.tipo === "previdenciario" && r.modo === "causa" ? `<button class="btn btn-sec btn-peq" id="c-valor-causa">Usar como valor da causa do processo</button>` : ""}
+    <button class="btn btn-sec btn-peq" id="c-imprimir">Memória em PDF</button>
+    <button class="btn btn-sec btn-peq" id="c-xlsx">Planilha Excel</button></div>`;
+  const texto = `<div class="campo" style="margin-top:14px"><label for="c-texto">Texto para a petição</label><textarea id="c-texto" rows="8" readonly>${esc(textoPeticao(C))}</textarea>
+    <button type="button" class="btn btn-sec btn-peq" id="c-copiar" style="justify-self:start">Copiar texto</button></div>`;
+  if (r.tipo === "atualizacao") {
+    const t = r.totais;
+    return `<div class="cartao">
+      <span class="rotulo">Total atualizado até ${dBR(r.dataCalculo)}</span>
+      <div class="calc-total">${moeda(t.total)}</div>
+      <dl class="calc-resumo">
+        <dt>Valores originais</dt><dd>${moeda(t.valor)}</dd>
+        <dt>Principal corrigido</dt><dd>${moeda(t.corrigido)}</dd>
+        <dt>Juros de mora</dt><dd>${moeda(t.juros)}</dd>
+        ${t.multa ? `<dt>Multa</dt><dd>${moeda(t.multa)}</dd>` : ""}${t.honorarios ? `<dt>Honorários</dt><dd>${moeda(t.honorarios)}</dd>` : ""}
+      </dl>
+      ${avisos}${botoes}${texto}
+      <details class="calc-det" open><summary>Memória de cálculo</summary><div class="rolar"><table class="tabela-calc">
+        <thead><tr><th>Descrição</th><th>Data</th><th>Valor</th><th>Fator</th><th>Corrigido</th><th>Juros %</th><th>Juros</th><th>Total</th></tr></thead>
+        <tbody>${r.linhas.map((l) => `<tr><td>${esc(l.descricao || "-")}</td><td>${dBR(l.data)}</td><td>${moeda(l.valor)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td><td>${pct(l.taxaJuros, 4)}</td><td>${moeda(l.juros)}</td><td><b>${moeda(l.total)}</b></td></tr>`).join("")}</tbody>
+      </table></div></details>
+    </div>`;
+  }
+  const v = r.vincendas;
+  const jef = r.modo === "causa" ? (r.excedeJEF
+    ? `<div class="aviso aviso-erro peq">Excede o limite do JEF: 60 salários mínimos = ${moeda(r.tetoJEF)} (mínimo de ${moeda(r.salarioMinimo)}). O texto abaixo já traz a renúncia ao excedente; apague o parágrafo se a ação for para a Vara Federal.</div>`
+    : `<div class="aviso aviso-ok peq">Dentro do limite do JEF: 60 salários mínimos = ${moeda(r.tetoJEF)}.</div>`) : "";
+  return `<div class="cartao">
+    <span class="rotulo">${r.modo === "causa" ? "Valor da causa" : `Atrasados atualizados até ${dBR(r.dataCalculo)}`}</span>
+    <div class="calc-total">${moeda(r.total)}</div>
+    <dl class="calc-resumo">
+      <dt>Período</dt><dd>${r.periodo.fim ? `${dBR(r.periodo.inicio)} a ${dBR(r.periodo.fim)}` : "sem parcelas vencidas"}${r.periodo.prescritoAte ? ` <span class="mudo">(prescrito até ${dBR(r.periodo.prescritoAte)})</span>` : ""}</dd>
+      <dt>Parcelas vencidas</dt><dd>${moeda(r.vencidas.devido)} <span class="mudo">sem correção</span></dd>
+      <dt>Vencidas corrigidas</dt><dd>${moeda(r.vencidas.corrigido)}</dd>
+      ${r.modo === "atrasados" ? `<dt>Juros de mora</dt><dd>${moeda(r.vencidas.juros)}</dd>` : ""}
+      ${v ? `<dt>Vincendas</dt><dd>${v.parcelas}${v.decimo ? " + 13º" : ""} × ${moeda(v.valorMensal)} = ${moeda(v.total)}</dd>` : ""}
+    </dl>
+    ${jef}${avisos}${botoes}${texto}
+    <details class="calc-det"><summary>Parcela a parcela (${r.linhas.length} linhas)</summary><div class="rolar"><table class="tabela-calc">
+      <thead><tr><th>Competência</th><th>Devido</th><th>Fator</th><th>Corrigido</th>${r.modo === "atrasados" ? "<th>Juros</th>" : ""}<th>Total</th></tr></thead>
+      <tbody>${r.linhas.map((l) => `<tr${l.decimo ? ' class="d13"' : ""}><td>${esc(l.rotulo)}${l.dias ? ` <span class="mudo">(${l.dias} dias)</span>` : ""}</td><td>${moeda(l.devido)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td>${r.modo === "atrasados" ? `<td>${moeda(l.juros)}</td>` : ""}<td><b>${moeda(l.total)}</b></td></tr>`).join("")}</tbody>
+      <tfoot><tr><th>Total</th><th>${moeda(r.vencidas.devido)}</th><th></th><th>${moeda(r.vencidas.corrigido)}</th>${r.modo === "atrasados" ? `<th>${moeda(r.vencidas.juros)}</th>` : ""}<th>${moeda(r.vencidas.total)}</th></tr></tfoot>
+    </table></div>
+    ${r.reajustes.length ? `<p class="peq mudo" style="margin-top:8px">Reajustes aplicados: ${r.reajustes.map((x) => `${x.ano}: ${pct(x.percentual, 2)}% (${moeda(x.valor)})`).join("; ")}.</p>` : ""}
+    </details>
+  </div>`;
+}
+
+function tituloCalculo(C) {
+  const p = C.params, r = C.res;
+  const nome = C.cliente_id && S.cli[C.cliente_id] ? S.cli[C.cliente_id].nome + " · " : "";
+  if (r.tipo === "atualizacao") return `${nome}Atualização até ${dBR(r.dataCalculo)}`;
+  return `${nome}${r.modo === "causa" ? "Valor da causa" : "Atrasados"} · ${ESPECIES[p.especie]?.nome || "Benefício"} · DIB ${dBR(p.dib)}`;
+}
+
+function ligarResultado(C) {
+  const r = C.res;
+  app.querySelector("#c-copiar").onclick = async () => {
+    const t = app.querySelector("#c-texto");
+    try { await navigator.clipboard.writeText(t.value); } catch { t.select(); document.execCommand("copy"); }
+    toast("Texto copiado.");
+  };
+  app.querySelector("#c-salvar").onclick = async (e) => {
+    if (C.salvoId) return toast("Este cálculo já está salvo.");
+    e.target.disabled = true;
+    const total = r.tipo === "atualizacao" ? r.totais.total : r.total;
+    const ins = await db.from("calculos").insert({ cliente_id: C.cliente_id, processo_id: C.processo_id, tipo: r.tipo, titulo: tituloCalculo(C),
+      parametros: C.params, resultado: r, total, criado_por: S.advogado?.nome || null }).select().single();
+    e.target.disabled = false;
+    if (ins.error) return toast(ins.error.message, true);
+    C.salvoId = ins.data.id; e.target.textContent = "Salvo"; toast("Cálculo salvo."); listarCalculosSalvos();
+  };
+  app.querySelector("#c-valor-causa")?.addEventListener("click", async () => {
+    const up = await db.from("processos").update({ valor_causa: r.total }).eq("id", C.processo_id);
+    if (up.error) return toast(up.error.message, true);
+    S.proc[C.processo_id].valor_causa = r.total;
+    toast(`Valor da causa gravado no processo: ${moeda(r.total)}.`);
+  });
+  app.querySelector("#c-imprimir").onclick = () => imprimirMemoria(C);
+  app.querySelector("#c-xlsx").onclick = () => planilhaCalculo(C);
+}
+
+async function listarCalculosSalvos() {
+  const box = app.querySelector("#c-salvos");
+  if (!box) return;
+  const q = await db.from("calculos").select("id,cliente_id,processo_id,tipo,titulo,total,criado_por,criado_em").order("criado_em", { ascending: false }).limit(40);
+  if (q.error) { box.innerHTML = `<div class="aviso aviso-erro">${esc(q.error.message)}</div>`; return; }
+  if (!q.data.length) { box.innerHTML = '<div class="vazio">Nenhum cálculo salvo ainda.</div>'; return; }
+  box.innerHTML = `<div class="lista">${q.data.map((c) => `<div class="item"><div class="principal"><b>${esc(c.titulo)}</b>
+      <div class="sec">${moeda(c.total)} · ${dataBR(c.criado_em)}${c.criado_por ? " · " + esc(primeiroNome(c.criado_por)) : ""}${c.processo_id && S.proc[c.processo_id] ? " · " + esc(S.proc[c.processo_id].titulo) : ""}</div></div>
+      <div class="dir"><button class="btn btn-sec btn-peq" data-abrir-calc="${c.id}">Abrir</button><button class="x" data-del-calc="${c.id}" title="Excluir" aria-label="Excluir">×</button></div></div>`).join("")}</div>`;
+  box.querySelectorAll("[data-abrir-calc]").forEach((b) => (b.onclick = async () => {
+    const r = await db.from("calculos").select("*").eq("id", b.dataset.abrirCalc).single();
+    if (r.error) return toast(r.error.message, true);
+    const c = r.data;
+    const aba = c.parametros.aba || (c.tipo === "atualizacao" ? "atualizacao" : c.parametros.modo || "causa");
+    S.calc = { aba, params: { ...paramsPadrao(aba), ...c.parametros }, res: c.resultado, cliente_id: c.cliente_id, processo_id: c.processo_id, salvoId: c.id };
+    telaCalculos();
+  }));
+  box.querySelectorAll("[data-del-calc]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Excluir este cálculo salvo?")) return;
+    const r = await db.from("calculos").delete().eq("id", b.dataset.delCalc);
+    if (r.error) return toast(r.error.message, true);
+    if (S.calc?.salvoId === b.dataset.delCalc) S.calc.salvoId = null;
+    listarCalculosSalvos();
+  }));
+}
+
+function metodologia(C) {
+  const r = C.res, p = C.params;
+  if (r.tipo === "atualizacao") {
+    const reg = {
+      lei14905: "Correção monetária pelo INPC até agosto de 2024 e pelo IPCA a partir de setembro de 2024 (art. 389, parágrafo único, do Código Civil, na redação da Lei nº 14.905/2024).",
+      selic: "Taxa SELIC acumulada mensalmente de forma simples, abrangendo correção monetária e juros.",
+      nenhum: "Sem correção monetária.",
+    }[r.regime] || `Correção monetária pelo ${NOMES_INDICE[r.regime]}, acumulado mês a mês a partir do mês de cada valor até o mês anterior ao da atualização.`;
+    const jur = {
+      regime: "Juros de mora simples de 1% ao mês até 29/08/2024 e, a partir de 30/08/2024, pela taxa legal do art. 406 do Código Civil divulgada pelo Banco Central (Resolução CMN nº 5.171/2024), proporcionais aos dias.",
+      nenhum: "Sem juros de mora.", um: "Juros de mora simples de 1% ao mês, proporcionais aos dias.", meio: "Juros de mora simples de 0,5% ao mês, proporcionais aos dias.",
+      legal: "Juros de mora pela taxa legal do art. 406 do Código Civil divulgada pelo Banco Central (Resolução CMN nº 5.171/2024), proporcionais aos dias.",
+    }[r.juros];
+    return [reg, jur + (p.jurosDesde && r.juros !== "nenhum" ? ` Termo inicial dos juros: ${dBR(p.jurosDesde)}.` : r.juros !== "nenhum" ? " Termo inicial dos juros: data de cada valor." : ""),
+      "Índices negativos de deflação são aplicados sem reduzir o valor nominal."];
+  }
+  const e = ESPECIES[p.especie];
+  const base = [
+    `Benefício: ${e?.nome || "-"}. DIB ${dBR(p.dib)}${p.dcb ? `, cessação em ${dBR(p.dcb)}` : ""}. ${p.rmiModo === "sm" ? "Renda mensal de um salário mínimo, conforme o valor vigente em cada competência." : `RMI de ${moeda(p.rmi)} na DIB, reajustada anualmente pelo INPC, proporcionalmente no primeiro reajuste (art. 41-A da Lei nº 8.213/1991)${p.pisoSM ? ", observado o piso do salário mínimo" : ""}.`}`,
+    p.prescricao ? "Prescrição quinquenal contada da data do ajuizamento (art. 103, parágrafo único, da Lei nº 8.213/1991)." : "Sem aplicação de prescrição.",
+    p.decimoTerceiro ? "Abono anual calculado sobre a renda de dezembro, ou do último mês do período, à razão de 1/12 por mês com 15 dias ou mais de benefício." : "Sem abono anual.",
+    "Correção monetária conforme o Manual de Cálculos da Justiça Federal (Resolução CJF nº 990/2026): INPC até novembro de 2021; taxa SELIC, acumulada de forma simples, de dezembro de 2021 a agosto de 2025 (art. 3º da EC nº 113/2021, na redação original); INPC a partir de setembro de 2025. Índices contados do mês do vencimento de cada parcela até o mês anterior ao do cálculo; a deflação não reduz o valor nominal.",
+  ];
+  if (r.modo === "atrasados") base.push(p.citacao ? `Juros de mora desde a citação (${dBR(p.citacao)}): até novembro de 2021, os juros aplicados à caderneta de poupança; de dezembro de 2021 a agosto de 2025, englobados na SELIC; a partir de setembro de 2025, taxa legal correspondente ao fator SELIC do mês deduzido o INPC do mês anterior, sem valores negativos.` : "Sem juros de mora (data da citação não informada).");
+  else base.push(`Parcelas vencidas até o mês anterior ao do ajuizamento, atualizadas até ${dBR(p.ajuizamento)}.${r.vincendas ? ` Vincendas: ${r.vincendas.parcelas}${r.vincendas.decimo ? " parcelas e um abono anual" : " parcelas"} pela renda da competência do ajuizamento (art. 292, §§ 1º e 2º, do CPC).` : ""}`);
+  return base;
+}
+
+function imprimirMemoria(C) {
+  const r = C.res, p = C.params;
+  const cli = C.cliente_id ? S.cli[C.cliente_id] : null;
+  const proc = C.processo_id ? S.proc[C.processo_id] : null;
+  const e = (s) => esc(s);
+  let tabela, resumo;
+  if (r.tipo === "atualizacao") {
+    const t = r.totais;
+    tabela = `<table><thead><tr><th>Descrição</th><th>Data</th><th>Valor original</th><th>Fator de correção</th><th>Valor corrigido</th><th>Juros (%)</th><th>Juros</th><th>Total</th></tr></thead>
+      <tbody>${r.linhas.map((l) => `<tr><td>${e(l.descricao || "-")}</td><td>${dBR(l.data)}</td><td>${moeda(l.valor)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td><td>${pct(l.taxaJuros, 4)}</td><td>${moeda(l.juros)}</td><td>${moeda(l.total)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><th colspan="2">Soma</th><th>${moeda(t.valor)}</th><th></th><th>${moeda(t.corrigido)}</th><th></th><th>${moeda(t.juros)}</th><th>${moeda(t.subtotal)}</th></tr></tfoot></table>`;
+    resumo = `<tr><td>Principal corrigido</td><td>${moeda(t.corrigido)}</td></tr><tr><td>Juros de mora</td><td>${moeda(t.juros)}</td></tr>
+      ${t.multa ? `<tr><td>Multa (${String(p.multa).replace(".", ",")}%)</td><td>${moeda(t.multa)}</td></tr>` : ""}${t.honorarios ? `<tr><td>Honorários (${String(p.honorarios).replace(".", ",")}%)</td><td>${moeda(t.honorarios)}</td></tr>` : ""}
+      <tr class="tot"><td>Total em ${dBR(r.dataCalculo)}</td><td>${moeda(t.total)}</td></tr>`;
+  } else {
+    const at = r.modo === "atrasados";
+    tabela = `<table><thead><tr><th>Competência</th><th>Renda mensal</th><th>Valor devido</th><th>Fator de atualização</th><th>Valor corrigido</th>${at ? "<th>Juros</th>" : ""}<th>Total</th></tr></thead>
+      <tbody>${r.linhas.map((l) => `<tr><td>${e(l.rotulo)}${l.dias ? ` (${l.dias} dias)` : ""}</td><td>${moeda(l.base)}</td><td>${moeda(l.devido)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td>${at ? `<td>${moeda(l.juros)}</td>` : ""}<td>${moeda(l.total)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><th colspan="2">Soma das vencidas</th><th>${moeda(r.vencidas.devido)}</th><th></th><th>${moeda(r.vencidas.corrigido)}</th>${at ? `<th>${moeda(r.vencidas.juros)}</th>` : ""}<th>${moeda(r.vencidas.total)}</th></tr></tfoot></table>`;
+    resumo = `<tr><td>Parcelas vencidas atualizadas</td><td>${moeda(r.vencidas.total)}</td></tr>
+      ${r.vincendas ? `<tr><td>Parcelas vincendas (${r.vincendas.parcelas}${r.vincendas.decimo ? " + abono anual" : ""} × ${moeda(r.vincendas.valorMensal)})</td><td>${moeda(r.vincendas.total)}</td></tr>` : ""}
+      <tr class="tot"><td>${at ? `Total em ${dBR(r.dataCalculo)}` : "Valor da causa"}</td><td>${moeda(r.total)}</td></tr>
+      ${!at ? `<tr><td>Limite do JEF (60 salários mínimos de ${moeda(r.salarioMinimo)})</td><td>${moeda(r.tetoJEF)}</td></tr>` : ""}`;
+  }
+  const titulo = r.tipo === "atualizacao" ? "MEMÓRIA DE CÁLCULO: ATUALIZAÇÃO DE DÉBITO" : r.modo === "causa" ? "MEMÓRIA DE CÁLCULO DO VALOR DA CAUSA" : "MEMÓRIA DE CÁLCULO DAS PARCELAS ATRASADAS";
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${e(tituloCalculo(C))}</title>
+  <style>
+    @page{size:A4;margin:18mm 16mm 18mm 18mm}
+    body{font-family:"Lucida Console",Monaco,monospace;font-size:9.5pt;color:#111;margin:0}
+    h1{font-size:11.5pt;text-align:center;margin:0 0 10px;letter-spacing:.03em}
+    .cab{border-bottom:1px solid #999;padding-bottom:8px;margin-bottom:12px;font-size:9pt}
+    .cab b{font-size:10pt}
+    p{margin:3px 0;text-align:justify}
+    table{border-collapse:collapse;width:100%;margin:8px 0 12px;font-size:8.5pt}
+    th,td{border:1px solid #999;padding:3px 5px;text-align:right}
+    th:first-child,td:first-child{text-align:left}
+    thead th{background:#eee}
+    tfoot{display:table-row-group}
+    tfoot th{background:#f5f5f5}
+    td,th{white-space:nowrap}
+    td:first-child{white-space:normal}
+    .resumo{width:auto;min-width:60%;font-size:9.5pt}
+    .resumo td:first-child{text-align:left}
+    .tot td{font-weight:bold;background:#f0f0f0}
+    .met p{font-size:8.5pt}
+    .rod{margin-top:16px;font-size:8pt;color:#444;border-top:1px solid #999;padding-top:6px;text-align:center}
+    thead{display:table-header-group}
+    tr{page-break-inside:avoid}
+  </style></head><body>
+  <div class="cab"><b>Charles dos Santos Borges</b> · Advogado · OAB/SC 77.242</div>
+  <h1>${titulo}</h1>
+  ${cli ? `<p><b>Parte:</b> ${e(cli.nome)}${cli.cpf ? ", CPF " + e(cli.cpf) : ""}</p>` : ""}
+  ${proc ? `<p><b>Processo:</b> ${e(proc.numero || proc.titulo)}${proc.juizo ? " · " + e(proc.juizo) : ""}</p>` : ""}
+  <p><b>Data do cálculo:</b> ${dBR(r.dataCalculo)}</p>
+  <table class="resumo"><tbody>${resumo}</tbody></table>
+  <div class="met"><p><b>Critérios</b></p>${metodologia(C).map((t) => `<p>${e(t)}</p>`).join("")}${r.avisos.length ? `<p>${r.avisos.map(e).join(" ")}</p>` : ""}</div>
+  ${tabela}
+  <div class="rod">A justiça também se faz pelo consenso · portalcharles@gmail.com · WhatsApp (49) 99821-4100 · OAB/SC 77.242</div>
+  <script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>
+  </body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) return toast("O navegador bloqueou a janela. Permita pop-ups para este site.", true);
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+async function planilhaCalculo(C) {
+  try { await carregarXLSX(); } catch { return toast("Não consegui carregar o gerador de planilhas.", true); }
+  const r = C.res;
+  const linhas = [[tituloCalculo(C)], ["Data do cálculo", dBR(r.dataCalculo)], []];
+  if (r.tipo === "atualizacao") {
+    linhas.push(["Descrição", "Data", "Valor original", "Fator de correção", "Valor corrigido", "Juros (%)", "Juros", "Total"]);
+    r.linhas.forEach((l) => linhas.push([l.descricao, dBR(l.data), l.valor, Number(l.fator.toFixed(6)), l.corrigido, Number(l.taxaJuros.toFixed(4)), l.juros, l.total]));
+    const t = r.totais;
+    linhas.push([], ["Principal corrigido", "", "", "", t.corrigido], ["Juros", "", "", "", t.juros], ["Multa", "", "", "", t.multa], ["Honorários", "", "", "", t.honorarios], ["Total", "", "", "", t.total]);
+  } else {
+    linhas.push(["Competência", "Renda mensal", "Dias", "Valor devido", "Fator de atualização", "Valor corrigido", "Juros", "Total"]);
+    r.linhas.forEach((l) => linhas.push([l.rotulo, l.base, l.dias || "", l.devido, Number(l.fator.toFixed(6)), l.corrigido, l.juros, l.total]));
+    linhas.push([], ["Vencidas", "", "", r.vencidas.devido, "", r.vencidas.corrigido, r.vencidas.juros, r.vencidas.total]);
+    if (r.vincendas) linhas.push([`Vincendas (${r.vincendas.parcelas}${r.vincendas.decimo ? " + 13º" : ""} × ${moeda(r.vincendas.valorMensal)})`, "", "", "", "", "", "", r.vincendas.total]);
+    linhas.push(["Total", "", "", "", "", "", "", r.total]);
+  }
+  linhas.push([], ...metodologia(C).map((t) => [t]));
+  const ws = XLSX.utils.aoa_to_sheet(linhas);
+  ws["!cols"] = [{ wch: 26 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Cálculo");
+  XLSX.writeFile(wb, "calculo-" + norm(tituloCalculo(C)).replace(/[^a-z0-9]+/g, "-").slice(0, 60) + ".xlsx");
+}
 
 // ================= PUBLICAÇÕES (DJEN, pela OAB) =================
 async function telaPublicacoes() {
@@ -1004,6 +1474,7 @@ function dialogoProcesso(p) {
       <div class="campo"><label for="juizo">Juízo / órgão</label><input id="juizo" name="juizo" type="text" placeholder="Ex.: Vara Única de Anchieta" value="${esc(p.juizo)}"></div>
       <div class="campo"><label for="parte">Parte contrária</label><input id="parte" name="parte_contraria" type="text" value="${esc(p.parte_contraria)}"></div>
     </div>
+    <div class="campo"><label for="valor_causa">Valor da causa (R$)</label><input id="valor_causa" name="valor_causa" type="text" inputmode="decimal" placeholder="0,00" value="${p.valor_causa ? esc(Number(p.valor_causa).toLocaleString("pt-BR", { minimumFractionDigits: 2 })) : ""}"><span class="dica">Pode vir da aba Cálculos.</span></div>
     <div class="campo"><label for="resumo">Resumo para o cliente</label><textarea id="resumo" name="resumo" placeholder="Explicação em linguagem simples sobre o processo.">${esc(p.resumo)}</textarea></div>
     ${novo ? "" : `<label class="check"><input type="checkbox" name="arquivado" ${p.arquivado ? "checked" : ""}><span>Processo encerrado (sai da lista principal e para de gerar avisos)</span></label>`}
     <div class="dlg-botoes">
@@ -1012,7 +1483,8 @@ function dialogoProcesso(p) {
     </div>
   </form>`, async (f) => {
     const dados = { titulo: val(f, "titulo"), numero: val(f, "numero") || null, situacao: val(f, "situacao") || "Em andamento",
-      juizo: val(f, "juizo") || null, parte_contraria: val(f, "parte_contraria") || null, resumo: val(f, "resumo") || null };
+      juizo: val(f, "juizo") || null, parte_contraria: val(f, "parte_contraria") || null, resumo: val(f, "resumo") || null,
+      valor_causa: val(f, "valor_causa") ? numBR(val(f, "valor_causa")) : null };
     if (novo) dados.cliente_id = p.cliente_id; else dados.arquivado = f.elements.arquivado.checked;
     const r = novo ? await db.from("processos").insert(dados).select().single() : await db.from("processos").update(dados).eq("id", p.id).select().single();
     if (r.error) return toast(r.error.message, true);
