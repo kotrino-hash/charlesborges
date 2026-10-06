@@ -1943,6 +1943,46 @@ function dialogoDespesa(d, depois) {
 }
 
 // ================= PUBLICAÇÕES (DJEN, pela OAB) =================
+// Separa o cabeçalho da intimação (classe, partes e advogados) do texto do ato
+const OAB_ESCRITORIO = /077242|77242|42994|042994|136810/;
+function rotuloBonito(r) {
+  return r.toLowerCase().replace(/(^|[\s/])([a-zà-ý])/g, (m, a, b) => a + b.toUpperCase()).replace(/\(([a-z]+)\)$/i, (m, x) => "(" + x.toLowerCase() + ")");
+}
+function separarPublicacao(p) {
+  const linhas = (p.texto || "").split("\n");
+  const ROT = /^([A-ZÀ-Ý][A-ZÀ-Ý ]*[A-ZÀ-Ý](?:\((?:A|S|AS|ES)\))?)\s*:\s*(.+)$/;
+  let classe = "", origem = "", i = 0; const partes = [];
+  for (; i < linhas.length; i++) {
+    const l = linhas[i].trim();
+    if (!l) { if (partes.length) { i++; break; } continue; }
+    const m = l.match(ROT);
+    if (m && !/^(DESPACHO|DECIS|SENTEN|ATO ORDIN|AC[ÓO]RD|EMENTA|CERTID|INTIMA)/.test(m[1])) {
+      if (m[1] === "PROCESSO ORIGINÁRIO") origem = m[2]; else partes.push({ rotulo: rotuloBonito(m[1]), nome: m[2] });
+    } else if (i === 0 && !m && l.length < 160) classe = l;
+    else break;
+  }
+  let corpo = linhas.slice(i).join("\n").trim();
+  // Se o texto não trouxe o cabeçalho, usa os destinatários informados pelo DJEN
+  if (!partes.length && p.bruto) {
+    const b = p.bruto;
+    (b.destinatarios || []).forEach((d) => d && d.nome && partes.push({ rotulo: d.polo === "A" ? "Polo ativo" : d.polo === "P" ? "Polo passivo" : "Parte", nome: d.nome }));
+    (b.destinatarioadvogados || b.destinatarioAdvogados || []).forEach((d) => {
+      const a = d && (d.advogado || d); if (!a || !a.nome) return;
+      partes.push({ rotulo: "Advogado(a)", nome: a.nome + (a.numero_oab ? " (OAB " + (a.uf_oab || "") + a.numero_oab + ")" : "") });
+    });
+    corpo = (p.texto || "").trim(); classe = "";
+  }
+  if (!partes.length) { classe = ""; origem = ""; corpo = (p.texto || "").trim(); }
+  return { classe, origem, partes, corpo };
+}
+function cabecalhoPublicacao(x) {
+  if (!x.partes.length) return "";
+  return `<div class="pub-cab">
+    ${x.classe ? `<div class="pub-classe">${esc(x.classe)}</div>` : ""}${x.origem ? `<div class="pub-origem">Processo originário: ${esc(x.origem)}</div>` : ""}
+    <dl class="pub-partes">${x.partes.map((pt) => `<div class="${/^Advogad|^Procurad|^Defensor/.test(pt.rotulo) ? "adv" : "parte"}${OAB_ESCRITORIO.test(pt.nome.replace(/\D/g, "")) ? " nosso" : ""}"><dt>${esc(pt.rotulo)}</dt><dd>${esc(pt.nome)}</dd></div>`).join("")}</dl>
+  </div>`;
+}
+
 async function telaPublicacoes() {
   const filtro = S.filtroPub || "nao-lidas";
   app.innerHTML = '<div class="carregando">Carregando publicações...</div>';
@@ -1972,12 +2012,14 @@ async function telaPublicacoes() {
     ${lista.length ? `<div class="lista">${lista.map((p) => {
       const procs = procPorNum[p.numero_processo] || [];
       const c = procs[0] && S.cli[procs[0].cliente_id];
-      const longo = (p.texto || "").length > 420;
+      const sep = separarPublicacao(p);
+      const longo = sep.corpo.length > 420;
       return `<div class="item" style="align-items:flex-start"><div class="principal" style="flex:1">
         <div><span class="peq mudo">${p.data_disp ? dBR(p.data_disp) : ""}${p.tribunal ? " · " + esc(p.tribunal) : ""}${p.orgao ? " · " + esc(p.orgao) : ""}</span> ${p.lida ? "" : '<span class="tag tag-prazo">nova</span>'}</div>
         <div><b>${esc(p.tipo || "Comunicação")}</b> · processo ${esc(p.numero_mascara || p.numero_processo || "sem número")}</div>
         <div class="sec">${c ? procs.map((pp) => `<a href="#cliente/${pp.cliente_id}">${esc(S.cli[pp.cliente_id]?.nome || "")}</a> · ${esc(pp.titulo)}`).join("<br>") : '<span style="color:var(--warn)">processo não cadastrado no painel</span>'}</div>
-        <div class="pub-texto${longo ? " recolhido" : ""}" data-txt="${p.id}">${esc(p.texto || "")}</div>
+        ${cabecalhoPublicacao(sep)}
+        ${sep.corpo ? `<div class="pub-texto${longo ? " recolhido" : ""}" data-txt="${p.id}">${esc(sep.corpo)}</div>` : ""}
         ${longo ? `<button class="pub-alternar" data-vermais="${p.id}" aria-expanded="false"><span>Ver texto completo</span> <i aria-hidden="true">▾</i></button>` : ""}
         ${p.link || c?.drive_url ? `<div class="peq">${p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener">Abrir o documento</a>` : ""}${p.link && c?.drive_url ? " · " : ""}${c?.drive_url ? `<a href="${esc(c.drive_url)}" target="_blank" rel="noopener">Pasta do cliente no Drive</a>` : ""}</div>` : ""}
       </div><div class="dir" style="flex-direction:column;align-items:stretch">

@@ -380,3 +380,16 @@ input.campo-erro{border-color:#D9A39A!important}
 .pub-alternar i{font-style:normal;transition:transform .2s}
 .pub-alternar[aria-expanded="true"] i{transform:rotate(180deg)}
 @media (max-width:600px){.pub-texto{text-align:left;padding:10px 12px}}
+/* Cabeçalho da publicação: partes e advogados sempre visíveis */
+.pub-cab{margin-top:10px;padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:4px}
+.pub-classe{font-weight:600;font-size:.92rem}
+.pub-origem{font-size:.84rem;color:var(--muted)}
+.pub-partes{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin-top:6px}
+.pub-partes>div{display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;align-items:baseline;font-size:.9rem}
+.pub-partes dt{color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.03em}
+.pub-partes dd{font-weight:600;overflow-wrap:anywhere}
+.pub-partes .adv dd{font-weight:500}
+.pub-partes .nosso dd{color:var(--bronze-ink)}
+.pub-partes .parte+.adv{border-top:1px dashed var(--line);padding-top:4px}
+.pub-cab+.pub-texto{margin-top:8px}
+@media (max-width:600px){.pub-partes>div{grid-template-columns:minmax(0,1fr);gap:0}.pub-partes>div+div{margin-top:4px}}
