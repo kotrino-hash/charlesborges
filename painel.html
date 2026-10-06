@@ -30,7 +30,9 @@
     <button class="aba" role="tab" data-rota="movimentacoes">Movimentações</button>
     <button class="aba" role="tab" data-rota="publicacoes">Publicações</button>
     <button class="aba" role="tab" data-rota="calculos">Cálculos</button>
+    <button class="aba" role="tab" data-rota="jurisprudencia">Jurisprudência</button>
     <button class="aba" role="tab" data-rota="honorarios">Honorários</button>
+    <button class="aba" role="tab" data-rota="despesas">Despesas</button>
     <button class="aba" role="tab" data-rota="envios">Avisos</button>
   </div>
 </nav>
@@ -132,8 +134,10 @@ function rotear() {
   if (rota === "clientes") return telaClientes();
   if (rota === "cliente" && id) return telaCliente(id);
   if (rota === "honorarios") return telaHonorarios();
+  if (rota === "despesas") return telaDespesas();
   if (rota === "publicacoes") return telaPublicacoes();
   if (rota === "calculos") return telaCalculos();
+  if (rota === "jurisprudencia") return telaJurisprudencia();
   if (rota === "fila") return telaFila();
   if (rota === "movimentacoes") return telaMovimentacoes();
   if (rota === "envios") return telaEnvios();
@@ -396,13 +400,13 @@ async function telaClientes() {
       return `<div class="item clicavel ${c.ativo ? "" : "inativo"}" data-cli="${c.id}">
         <div class="principal"><b>${esc(c.nome)}</b>${c.ativo ? "" : ' <span class="tag tag-oculto">inativo</span>'}${pf.length && c.ativo ? ' <span class="tag tag-incompleta">ficha incompleta</span>' : ""}
           <div class="sec">${c.cpf ? "CPF " + esc(c.cpf) + " · " : c.cnpj ? "CNPJ " + esc(c.cnpj) + " · " : ""}${c.email ? esc(c.email) : '<span style="color:var(--warn)">sem e-mail</span>'}${c.whatsapp ? " · " + mostraWhats(c.whatsapp) : ""}${c.cidade ? " · " + esc(c.cidade) : ""}</div></div>
-        <div class="dir" style="align-items:center">${areasDoCliente(c.id).map(tagArea).join(" ")}<span class="contador">${nProc[c.id] || 0} processo${(nProc[c.id] || 0) === 1 ? "" : "s"}</span></div>
+        <div class="dir" style="align-items:center">${c.drive_url ? `<a class="btn-drive" href="${esc(c.drive_url)}" target="_blank" rel="noopener" title="Abrir a pasta no Drive" aria-label="Abrir a pasta no Drive" data-parar>Drive</a>` : ""}${areasDoCliente(c.id).map(tagArea).join(" ")}<span class="contador">${nProc[c.id] || 0} processo${(nProc[c.id] || 0) === 1 ? "" : "s"}</span></div>
       </div>`;
     }).join("") : `<div class="vazio" style="border:0">Nenhum cliente encontrado.</div>`;
   };
   busca.addEventListener("input", desenhar);
   sel.addEventListener("change", desenhar);
-  lista.addEventListener("click", (e) => { const i = e.target.closest("[data-cli]"); if (i) location.hash = "cliente/" + i.dataset.cli; });
+  lista.addEventListener("click", (e) => { if (e.target.closest("[data-parar]")) return; const i = e.target.closest("[data-cli]"); if (i) location.hash = "cliente/" + i.dataset.cli; });
   app.querySelector("#novo-cli").onclick = () => dialogoFicha({});
   app.querySelector("#importar").onclick = dialogoImportar;
   desenhar();
@@ -505,6 +509,7 @@ async function telaCliente(id) {
                 <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
                   <button class="btn btn-primario btn-peq" data-novo-ev="${p.id}">+ Evento</button>
                   <button class="btn btn-sec btn-peq" data-calc-proc="${p.id}">Calcular</button>
+                  <button class="btn btn-sec btn-peq" data-juris-proc="${p.id}">Jurisprudência</button>
                   <button class="btn btn-sec btn-peq" data-editar-proc="${p.id}">Editar</button>
                 </div>
               </div>
@@ -562,6 +567,7 @@ async function telaCliente(id) {
   }));
   app.querySelectorAll("[data-editar-proc]").forEach((b) => (b.onclick = () => dialogoProcesso(S.proc[b.dataset.editarProc])));
   app.querySelectorAll("[data-novo-ev]").forEach((b) => (b.onclick = () => dialogoEvento({ processo_id: b.dataset.novoEv, depois: recarregar })));
+  app.querySelectorAll("[data-juris-proc]").forEach((b) => (b.onclick = () => { S.jurisProc = b.dataset.jurisProc; location.hash = "jurisprudencia"; }));
   app.querySelectorAll("[data-calc-proc]").forEach((b) => (b.onclick = () => {
     const pr = S.proc[b.dataset.calcProc];
     const prev = pr.area ? pr.area === "previdenciario" : /previd|inss|aposent|benef|aux[ií]lio|pens[aã]o|bpc|loas|maternidade|incapacidade/i.test([pr.titulo, pr.parte_contraria, pr.juizo].join(" "));
@@ -708,7 +714,7 @@ function dialogoFila(x, depois) {
     <div class="campo"><label for="fl-aj">Ajuizar até</label><input id="fl-aj" name="prazo_ajuizar" type="date" value="${esc(x.prazo_ajuizar || "")}"><span class="dica">${novo ? "Vazio: 10 dias a partir de hoje." : "Compromisso interno de 10 dias."}</span></div>
     <div class="campo"><label for="fl-resp">Responsável</label><input id="fl-resp" name="responsavel" type="text" list="fl-resps" value="${esc(x.responsavel ?? (novo ? eu : ""))}">
       <datalist id="fl-resps"><option value="Charles"></option><option value="Elmo"></option></datalist></div>
-    <div class="campo"><label for="fl-drive">Pasta do caso no Google Drive (link)</label><input id="fl-drive" name="drive_url" type="url" value="${esc(x.drive_url || "")}" placeholder="${c0?.drive_url ? "Vazio: usa a pasta do cliente" : "https://drive.google.com/drive/folders/..."}"></div>
+    <div class="campo"><label for="fl-drive">Pasta no Google Drive (link)</label><input id="fl-drive" name="drive_url" type="url" data-mask="drive" value="${esc(x.drive_url || c0?.drive_url || "")}" placeholder="https://drive.google.com/drive/folders/..."><span class="dica" id="fl-drive-dica">${c0?.drive_url ? "Veio da ficha do cliente." : "Se a ficha do cliente estiver sem pasta, este link também é gravado nela."}</span></div>
     <div class="campo"><label for="fl-obs">Observações</label><textarea id="fl-obs" name="observacoes" style="min-height:70px" placeholder="O que falta, tese, documentos pedidos...">${esc(x.observacoes || "")}</textarea></div>
     <div class="dlg-botoes">
       ${novo ? "" : '<button type="button" class="btn btn-perigo btn-peq" id="fl-excluir">Tirar da fila</button>'}
@@ -724,12 +730,23 @@ function dialogoFila(x, depois) {
       if (rc.error) return toast(rc.error.message, true);
       c = rc.data;
     }
+    // a pasta da ficha do cliente vale para a fila; só guarda link próprio se for diferente
+    if (drive && !c.drive_url) {
+      const u = await db.from("clientes").update({ drive_url: drive }).eq("id", c.id);
+      if (!u.error) c.drive_url = drive;
+    }
     const dados = { cliente_id: c.id, titulo, area: val(f, "area") || null, etapa: val(f, "etapa"), prioridade: val(f, "prioridade"),
-      prazo: val(f, "prazo") || null, ...(val(f, "prazo_ajuizar") || !novo ? { prazo_ajuizar: val(f, "prazo_ajuizar") || null } : {}), responsavel: val(f, "responsavel") || null, drive_url: drive || null, observacoes: val(f, "observacoes") || null };
+      prazo: val(f, "prazo") || null, ...(val(f, "prazo_ajuizar") || !novo ? { prazo_ajuizar: val(f, "prazo_ajuizar") || null } : {}), responsavel: val(f, "responsavel") || null,
+      drive_url: drive && drive !== c.drive_url ? drive : null, observacoes: val(f, "observacoes") || null };
     const r = novo ? await db.from("fila").insert(dados).select().single() : await db.from("fila").update(dados).eq("id", x.id).select().single();
     if (r.error) return toast(r.error.message, true);
     dlg.close(); toast(novo ? "Ação incluída na fila." : "Fila atualizada.");
     await recarregarBase(); depois && depois();
+  });
+  const flCli = dlg.querySelector("#fl-cli"), flDrive = dlg.querySelector("#fl-drive");
+  flCli.addEventListener("change", () => {
+    const c = S.clientes.find((y) => norm(y.nome) === norm(flCli.value));
+    if (c?.drive_url && !flDrive.value) { flDrive.value = c.drive_url; validarCampo(flDrive); dlg.querySelector("#fl-drive-dica").textContent = "Veio da ficha do cliente."; }
   });
   dlg.querySelector("#fl-excluir")?.addEventListener("click", async () => {
     if (!confirm("Tirar esta ação da fila? O cliente continua cadastrado.")) return;
@@ -745,7 +762,7 @@ function dialogoAjuizar(x, depois) {
   <form novalidate><h2>Registrar ajuizamento</h2>
     <p class="peq mudo" style="margin:-8px 0 14px">${esc(c.nome || "")} · ${esc(x.titulo)}</p>
     <div class="linha2">
-      <div class="campo"><label for="aj-num">Número do processo</label><input id="aj-num" name="numero" type="text" required placeholder="0000000-00.0000.0.00.0000"></div>
+      <div class="campo"><label for="aj-num">Número do processo</label><input id="aj-num" name="numero" type="text" inputmode="numeric" data-mask="cnj" required placeholder="0000000-00.0000.0.00.0000"></div>
       <div class="campo"><label for="aj-data">Data do ajuizamento</label><input id="aj-data" name="data" type="date" value="${HOJE()}" required></div>
     </div>
     <div class="linha2">
@@ -881,9 +898,9 @@ const numInput = (v) => (v === "" || v == null ? "" : Number(v).toLocaleString("
 
 function paramsPadrao(aba) {
   const hoje = HOJE();
-  if (aba === "atualizacao") return { aba, itens: [{ descricao: "", data: "", valor: "" }], dataFinal: hoje, regime: "lei14905", juros: "regime", jurosDesde: "", multa: "", honorarios: "" };
+  if (aba === "atualizacao") return { aba, itens: [{ descricao: "", data: "", valor: "" }], pagamentos: [], dataFinal: hoje, regime: "lei14905", juros: "regime", jurosDesde: "", multa: "", honorarios: "" };
   return { aba, modo: aba, especie: "idade_rural", dib: "", dcb: "", rmiModo: "sm", rmi: "", pisoSM: true, decimoTerceiro: true, prescricao: true,
-    vincendas: true, vincendas13: false, ajuizamento: hoje, citacao: "", dip: "", dataCalculo: hoje };
+    vincendas: true, vincendas13: false, ajuizamento: hoje, citacao: "", dip: "", dataCalculo: hoje, descontos: [] };
 }
 
 async function telaCalculos() {
@@ -916,7 +933,7 @@ async function telaCalculos() {
       <fieldset><legend>Valor do benefício</legend>
         <label class="check"><input type="radio" name="rmiModo" value="sm" ${p.rmiModo === "sm" ? "checked" : ""}><span>Um salário mínimo (acompanha o mínimo de cada ano)</span></label>
         <label class="check"><input type="radio" name="rmiModo" value="valor" ${p.rmiModo === "valor" ? "checked" : ""}><span>Renda mensal inicial informada, reajustada pelo INPC a cada janeiro</span></label>
-        <div class="campo" id="c-rmi-campo" ${p.rmiModo === "valor" ? "" : "hidden"}><label for="c-rmi">RMI na DIB (R$)</label><input id="c-rmi" name="rmi" type="text" inputmode="decimal" value="${esc(numInput(p.rmi))}" placeholder="0,00"></div>
+        <div class="campo" id="c-rmi-campo" ${p.rmiModo === "valor" ? "" : "hidden"}><label for="c-rmi">RMI na DIB (R$)</label><input id="c-rmi" name="rmi" type="text" data-mask="moeda" inputmode="decimal" value="${esc(numInput(p.rmi))}" placeholder="0,00"></div>
       </fieldset>
       <div class="linha2">${data("ajuizamento", "Data do ajuizamento", p.ajuizamento, at ? "Para a prescrição quinquenal." : "", true)}
         ${at ? data("citacao", "Data da citação", p.citacao, "Termo inicial dos juros.") : "<div></div>"}</div>
@@ -924,7 +941,21 @@ async function telaCalculos() {
       ${chk("decimoTerceiro", "Incluir o 13º salário (abono anual)", p.decimoTerceiro)}
       ${chk("pisoSM", "Respeitar o piso do salário mínimo", p.pisoSM, "Desmarque no auxílio-acidente.")}
       ${chk("prescricao", "Aplicar a prescrição quinquenal", p.prescricao, "Afasta parcelas anteriores aos 5 anos do ajuizamento.")}
-      ${at ? "" : chk("vincendas", "Somar as 12 parcelas vincendas (art. 292, §§ 1º e 2º, do CPC)", p.vincendas) + chk("vincendas13", "Incluir o 13º nas vincendas", p.vincendas13)}`;
+      ${at ? "" : chk("vincendas", "Somar as 12 parcelas vincendas (art. 292, §§ 1º e 2º, do CPC)", p.vincendas) + chk("vincendas13", "Incluir o 13º nas vincendas", p.vincendas13)}
+      <fieldset><legend>Valores já recebidos no período</legend>
+        <p class="peq mudo" style="margin:-2px 0 8px">Benefício inacumulável, auxílio pago administrativamente ou outro valor já recebido. É abatido mês a mês, com a mesma correção.</p>
+        <div id="c-descs">${(p.descontos || []).map((d, i) => `
+          <div class="desc-calc">
+            <input type="text" name="dd${i}" value="${esc(d.descricao || "")}" placeholder="Descrição (ex.: auxílio por incapacidade)" aria-label="Descrição">
+            <label class="mini">De<input type="date" name="di${i}" value="${esc(d.inicio || "")}"></label>
+            <label class="mini">Até<input type="date" name="df${i}" value="${esc(d.fim || "")}"></label>
+            <select name="dm${i}" aria-label="Valor mensal"><option value="sm" ${d.modo !== "valor" ? "selected" : ""}>1 salário mínimo</option><option value="valor" ${d.modo === "valor" ? "selected" : ""}>Valor mensal fixo</option></select>
+            <input type="text" name="dv${i}" data-mask="moeda" inputmode="decimal" value="${esc(numInput(d.valor))}" placeholder="R$ por mês" ${d.modo === "valor" ? "" : "hidden"} aria-label="Valor mensal">
+            <label class="check mini" style="margin:0"><input type="checkbox" name="d13${i}" ${d.decimo ? "checked" : ""}><span>com 13º</span></label>
+            <button type="button" class="x" data-rem-desc="${i}" title="Remover" aria-label="Remover">×</button>
+          </div>`).join("")}</div>
+        <button type="button" class="btn btn-sec btn-peq" id="c-add-desc">+ Valor recebido</button>
+      </fieldset>`;
   } else {
     form = `
       <div class="campo"><label>Valores a atualizar</label>
@@ -932,10 +963,20 @@ async function telaCalculos() {
           <div class="item-calc" data-i="${i}">
             <input type="text" name="desc${i}" value="${esc(it.descricao)}" placeholder="Descrição (opcional)" aria-label="Descrição">
             <input type="date" name="data${i}" value="${esc(it.data)}" aria-label="Data do valor">
-            <input type="text" name="valor${i}" inputmode="decimal" value="${esc(numInput(it.valor))}" placeholder="0,00" aria-label="Valor">
+            <input type="text" name="valor${i}" data-mask="moeda" inputmode="decimal" value="${esc(numInput(it.valor))}" placeholder="0,00" aria-label="Valor">
             <button type="button" class="x" data-rem="${i}" title="Remover" aria-label="Remover">×</button>
           </div>`).join("")}</div>
         <button type="button" class="btn btn-sec btn-peq" id="c-add" style="justify-self:start">+ Outro valor</button></div>
+      <div class="campo"><label>Valores já recebidos (abater)</label>
+        <div id="c-pags">${(p.pagamentos || []).map((it, i) => `
+          <div class="item-calc pago">
+            <input type="text" name="pdesc${i}" value="${esc(it.descricao)}" placeholder="Descrição (ex.: depósito, Pix, acordo)" aria-label="Descrição">
+            <input type="date" name="pdata${i}" value="${esc(it.data)}" aria-label="Data do pagamento">
+            <input type="text" name="pvalor${i}" data-mask="moeda" inputmode="decimal" value="${esc(numInput(it.valor))}" placeholder="0,00" aria-label="Valor recebido">
+            <button type="button" class="x" data-rem-pag="${i}" title="Remover" aria-label="Remover">×</button>
+          </div>`).join("")}</div>
+        <button type="button" class="btn btn-sec btn-peq" id="c-add-pag" style="justify-self:start">+ Valor recebido</button>
+        <span class="dica">Cada valor recebido é atualizado pelos mesmos critérios desde a data do pagamento e abatido do total.</span></div>
       ${data("dataFinal", "Atualizar até", p.dataFinal, "", true)}
       <div class="campo"><label for="c-regime">Correção monetária</label><select id="c-regime" name="regime">${Object.entries(REGIMES).map(([k, t]) => `<option value="${k}" ${p.regime === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
       <div class="linha2"><div class="campo"><label for="c-juros">Juros de mora</label><select id="c-juros" name="juros">${Object.entries(JUROS).map(([k, t]) => `<option value="${k}" ${p.juros === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
@@ -970,12 +1011,15 @@ async function telaCalculos() {
     const q = {};
     if (C.aba === "atualizacao") {
       q.itens = p.itens.map((_, i) => ({ descricao: val(f, "desc" + i), data: val(f, "data" + i), valor: numBR(val(f, "valor" + i)) }));
+      q.pagamentos = (p.pagamentos || []).map((_, i) => ({ descricao: val(f, "pdesc" + i), data: val(f, "pdata" + i), valor: numBR(val(f, "pvalor" + i)) }));
       Object.assign(q, { dataFinal: val(f, "dataFinal"), regime: val(f, "regime"), juros: val(f, "juros"), jurosDesde: val(f, "jurosDesde"),
         multa: val(f, "multa").replace(",", "."), honorarios: val(f, "honorarios").replace(",", ".") });
     } else {
       Object.assign(q, { modo: C.aba, especie: val(f, "especie"), dib: val(f, "dib"), dcb: val(f, "dcb"), rmiModo: f.querySelector("[name=rmiModo]:checked").value,
         rmi: numBR(val(f, "rmi")), ajuizamento: val(f, "ajuizamento"), citacao: val(f, "citacao"), dip: val(f, "dip"), dataCalculo: val(f, "dataCalculo") || HOJE() });
       for (const k of ["decimoTerceiro", "pisoSM", "prescricao", "vincendas", "vincendas13"]) q[k] = f.elements[k] ? f.elements[k].checked : false;
+      q.descontos = (p.descontos || []).map((_, i) => ({ descricao: val(f, "dd" + i), inicio: val(f, "di" + i), fim: val(f, "df" + i), modo: val(f, "dm" + i),
+        valor: numBR(val(f, "dv" + i)), decimo: f.elements["d13" + i].checked }));
     }
     q.aba = C.aba;
     return q;
@@ -1019,12 +1063,17 @@ async function telaCalculos() {
       app.querySelector("#c-rmi-campo").hidden = !!e.sm;
       if (e.dias && f.elements.dib.value && !f.elements.dcb.value) f.elements.dcb.value = somaDias(f.elements.dib.value, e.dias - 1);
     };
+    app.querySelector("#c-add-desc").onclick = () => { guardar(); C.params.descontos = [...(C.params.descontos || []), { descricao: "", inicio: f.elements.dib.value || "", fim: "", modo: "sm", valor: "", decimo: true }]; telaCalculos(); };
+    app.querySelectorAll("[data-rem-desc]").forEach((b) => (b.onclick = () => { guardar(); C.params.descontos.splice(Number(b.dataset.remDesc), 1); telaCalculos(); }));
+    f.querySelectorAll("[name^=dm]").forEach((sel) => (sel.onchange = () => { f.elements["dv" + sel.name.slice(2)].hidden = sel.value !== "valor"; }));
     f.elements.dib.onchange = () => {
       const e = ESPECIES[f.elements.especie.value];
       if (e.dias && f.elements.dib.value) f.elements.dcb.value = somaDias(f.elements.dib.value, e.dias - 1);
     };
   } else {
     app.querySelector("#c-add").onclick = () => { guardar(); C.params.itens.push({ descricao: "", data: "", valor: "" }); telaCalculos(); };
+    app.querySelector("#c-add-pag").onclick = () => { guardar(); C.params.pagamentos = [...(C.params.pagamentos || []), { descricao: "", data: "", valor: "" }]; telaCalculos(); };
+    app.querySelectorAll("[data-rem-pag]").forEach((b) => (b.onclick = () => { guardar(); C.params.pagamentos.splice(Number(b.dataset.remPag), 1); telaCalculos(); }));
     app.querySelectorAll("[data-rem]").forEach((b) => (b.onclick = () => {
       guardar(); C.params.itens.splice(Number(b.dataset.rem), 1);
       if (!C.params.itens.length) C.params.itens.push({ descricao: "", data: "", valor: "" });
@@ -1039,6 +1088,8 @@ async function telaCalculos() {
       if (!q.itens.some((it) => it.data && it.valor)) erro = "Informe ao menos um valor com a respectiva data.";
       else if (!q.dataFinal) erro = "Informe a data até quando atualizar.";
       else if (q.itens.some((it) => it.data && it.data > q.dataFinal)) erro = "Há valor com data posterior à data da atualização.";
+      else if (q.pagamentos.some((it) => it.valor && !it.data)) erro = "Informe a data de cada valor recebido.";
+      else if (q.pagamentos.some((it) => it.data && it.data > q.dataFinal)) erro = "Há valor recebido com data posterior à data da atualização.";
     } else {
       if (!q.dib) erro = "Informe a DIB.";
       else if (!q.ajuizamento) erro = "Informe a data do ajuizamento.";
@@ -1046,6 +1097,9 @@ async function telaCalculos() {
       else if (q.dcb && q.dcb < q.dib) erro = "A cessação não pode ser anterior à DIB.";
       else if (C.aba === "causa" && q.dib >= q.ajuizamento) erro = "A DIB é posterior ao ajuizamento: não há parcelas vencidas.";
       else if (C.aba === "atrasados" && q.dip && q.dip < q.dib) erro = "A DIP não pode ser anterior à DIB.";
+      else if (q.descontos.some((d) => !d.inicio || !d.fim)) erro = "Informe o período (de/até) de cada valor recebido.";
+      else if (q.descontos.some((d) => d.fim < d.inicio)) erro = "Em um dos valores recebidos, a data final é anterior à inicial.";
+      else if (q.descontos.some((d) => d.modo === "valor" && !d.valor)) erro = "Informe o valor mensal recebido.";
     }
     if (erro) return toast(erro, true);
     C.params = q; C.salvoId = null;
@@ -1064,13 +1118,14 @@ function textoPeticao(C) {
     const partes = [];
     if (t.multa) partes.push(`multa de ${String(p.multa).replace(".", ",")}%, no importe de ${moeda(t.multa)}`);
     if (t.honorarios) partes.push(`honorários de ${String(p.honorarios).replace(".", ",")}%, no importe de ${moeda(t.honorarios)}`);
+    if (t.pago) return `O débito, atualizado até ${dBR(r.dataCalculo)}, soma ${moeda(t.debito)}, já incluídos ${moeda(t.juros)} de juros de mora. Abatidos os valores recebidos (${moeda(t.pagoValor)}, que atualizados pelos mesmos critérios correspondem a ${moeda(t.pago)}), o saldo devedor perfaz ${moeda(t.subtotal)}${partes.length ? `, ao qual se acrescem ${partes.join(", e ")}, totalizando ${moeda(t.total)} (${reaisExtenso(t.total)})` : ` (${reaisExtenso(Math.max(t.subtotal, 0))})`}, conforme memória de cálculo anexa.`;
     return `O débito, atualizado até ${dBR(r.dataCalculo)}, perfaz ${moeda(t.total)} (${reaisExtenso(t.total)}), dos quais ${moeda(t.corrigido)} correspondem ao principal corrigido${t.juros ? ` e ${moeda(t.juros)} aos juros de mora` : ""}${partes.length ? `, acrescidos de ${partes.join(", e de ")}` : ""}, conforme memória de cálculo anexa.`;
   }
   if (r.modo === "atrasados") {
-    return `O montante das parcelas vencidas de ${dBR(r.periodo.inicio)} a ${dBR(r.periodo.fim)}, atualizado até ${dBR(r.dataCalculo)} segundo o Manual de Cálculos da Justiça Federal, perfaz ${moeda(r.total)} (${reaisExtenso(r.total)}), sendo ${moeda(r.vencidas.corrigido)} de principal corrigido e ${moeda(r.vencidas.juros)} de juros de mora, conforme memória de cálculo anexa.`;
+    return `O montante das parcelas vencidas de ${dBR(r.periodo.inicio)} a ${dBR(r.periodo.fim)}, atualizado até ${dBR(r.dataCalculo)} segundo o Manual de Cálculos da Justiça Federal${r.descontos?.length ? `, já abatidos os valores recebidos no período (${moeda(r.descontosTotal.total)} atualizados)` : ""}, perfaz ${moeda(r.total)} (${reaisExtenso(r.total)}), sendo ${moeda(r.vencidas.corrigido)} de principal corrigido e ${moeda(r.vencidas.juros)} de juros de mora, conforme memória de cálculo anexa.`;
   }
   const v = r.vincendas;
-  let txt = `Atribui-se à causa o valor de ${moeda(r.total)} (${reaisExtenso(r.total)}), correspondente à soma das parcelas vencidas desde ${dBR(r.periodo.inicio)}${p.decimoTerceiro ? ", acrescidas do abono anual," : ""} corrigidas monetariamente segundo o Manual de Cálculos da Justiça Federal, no importe de ${moeda(r.vencidas.total)}`;
+  let txt = `Atribui-se à causa o valor de ${moeda(r.total)} (${reaisExtenso(r.total)}), correspondente à soma das parcelas vencidas desde ${dBR(r.periodo.inicio)}${p.decimoTerceiro ? ", acrescidas do abono anual," : ""} corrigidas monetariamente segundo o Manual de Cálculos da Justiça Federal${r.descontos?.length ? " e abatidos os valores já recebidos no período" : ""}, no importe de ${moeda(r.vencidas.total)}`;
   const nv = v ? v.parcelas + v.decimo : 0;
   const qtd = nv === 1 ? "da parcela vincenda" : `das ${nv === 2 ? "duas" : inteiroExtenso(nv)} parcelas vincendas`;
   txt += v && v.total ? `, e ${qtd}, no importe de ${moeda(v.total)}, na forma do art. 292, §§ 1º e 2º, do Código de Processo Civil` : ", na forma do art. 292, § 1º, do Código de Processo Civil";
@@ -1100,12 +1155,14 @@ function resultadoHTML(C) {
         <dt>Valores originais</dt><dd>${moeda(t.valor)}</dd>
         <dt>Principal corrigido</dt><dd>${moeda(t.corrigido)}</dd>
         <dt>Juros de mora</dt><dd>${moeda(t.juros)}</dd>
+        ${t.pago ? `<dt>Recebidos (${moeda(t.pagoValor)})</dt><dd class="neg">− ${moeda(t.pago)}</dd><dt>Saldo devedor</dt><dd>${moeda(t.subtotal)}</dd>` : ""}
         ${t.multa ? `<dt>Multa</dt><dd>${moeda(t.multa)}</dd>` : ""}${t.honorarios ? `<dt>Honorários</dt><dd>${moeda(t.honorarios)}</dd>` : ""}
       </dl>
       ${avisos}${botoes}${texto}
       <details class="calc-det" open><summary>Memória de cálculo</summary><div class="rolar"><table class="tabela-calc">
         <thead><tr><th>Descrição</th><th>Data</th><th>Valor</th><th>Fator</th><th>Corrigido</th><th>Juros %</th><th>Juros</th><th>Total</th></tr></thead>
-        <tbody>${r.linhas.map((l) => `<tr><td>${esc(l.descricao || "-")}</td><td>${dBR(l.data)}</td><td>${moeda(l.valor)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td><td>${pct(l.taxaJuros, 4)}</td><td>${moeda(l.juros)}</td><td><b>${moeda(l.total)}</b></td></tr>`).join("")}</tbody>
+        <tbody>${r.linhas.map((l) => `<tr><td>${esc(l.descricao || "-")}</td><td>${dBR(l.data)}</td><td>${moeda(l.valor)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td><td>${pct(l.taxaJuros, 4)}</td><td>${moeda(l.juros)}</td><td><b>${moeda(l.total)}</b></td></tr>`).join("")}
+        ${(r.pagos || []).map((l) => `<tr class="neg"><td>(−) ${esc(l.descricao || "Valor recebido")}</td><td>${dBR(l.data)}</td><td>${moeda(l.valor)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td><td>${pct(l.taxaJuros, 4)}</td><td>${moeda(l.juros)}</td><td><b>− ${moeda(l.total)}</b></td></tr>`).join("")}</tbody>
       </table></div></details>
     </div>`;
   }
@@ -1118,16 +1175,18 @@ function resultadoHTML(C) {
     <div class="calc-total">${moeda(r.total)}</div>
     <dl class="calc-resumo">
       <dt>Período</dt><dd>${r.periodo.fim ? `${dBR(r.periodo.inicio)} a ${dBR(r.periodo.fim)}` : "sem parcelas vencidas"}${r.periodo.prescritoAte ? ` <span class="mudo">(prescrito até ${dBR(r.periodo.prescritoAte)})</span>` : ""}</dd>
-      <dt>Parcelas vencidas</dt><dd>${moeda(r.vencidas.devido)} <span class="mudo">sem correção</span></dd>
+      ${r.descontos?.length ? `<dt>Vencidas (bruto)</dt><dd>${moeda(r.bruto.total)}</dd><dt>Valores já recebidos</dt><dd class="neg">− ${moeda(r.descontosTotal.total)}</dd>` : ""}
+      <dt>Parcelas vencidas${r.descontos?.length ? " (líquido)" : ""}</dt><dd>${moeda(r.vencidas.devido)} <span class="mudo">sem correção</span></dd>
       <dt>Vencidas corrigidas</dt><dd>${moeda(r.vencidas.corrigido)}</dd>
       ${r.modo === "atrasados" ? `<dt>Juros de mora</dt><dd>${moeda(r.vencidas.juros)}</dd>` : ""}
       ${v ? `<dt>Vincendas</dt><dd>${v.parcelas}${v.decimo ? " + 13º" : ""} × ${moeda(v.valorMensal)} = ${moeda(v.total)}</dd>` : ""}
     </dl>
     ${jef}${avisos}${botoes}${texto}
-    <details class="calc-det"><summary>Parcela a parcela (${r.linhas.length} linhas)</summary><div class="rolar"><table class="tabela-calc">
+    <details class="calc-det"><summary>Parcela a parcela (${r.linhas.length + (r.descontos?.length || 0)} linhas)</summary><div class="rolar"><table class="tabela-calc">
       <thead><tr><th>Competência</th><th>Devido</th><th>Fator</th><th>Corrigido</th>${r.modo === "atrasados" ? "<th>Juros</th>" : ""}<th>Total</th></tr></thead>
-      <tbody>${r.linhas.map((l) => `<tr${l.decimo ? ' class="d13"' : ""}><td>${esc(l.rotulo)}${l.dias ? ` <span class="mudo">(${l.dias} dias)</span>` : ""}</td><td>${moeda(l.devido)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td>${r.modo === "atrasados" ? `<td>${moeda(l.juros)}</td>` : ""}<td><b>${moeda(l.total)}</b></td></tr>`).join("")}</tbody>
-      <tfoot><tr><th>Total</th><th>${moeda(r.vencidas.devido)}</th><th></th><th>${moeda(r.vencidas.corrigido)}</th>${r.modo === "atrasados" ? `<th>${moeda(r.vencidas.juros)}</th>` : ""}<th>${moeda(r.vencidas.total)}</th></tr></tfoot>
+      <tbody>${r.linhas.map((l) => `<tr${l.decimo ? ' class="d13"' : ""}><td>${esc(l.rotulo)}${l.dias ? ` <span class="mudo">(${l.dias} dias)</span>` : ""}</td><td>${moeda(l.devido)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td>${r.modo === "atrasados" ? `<td>${moeda(l.juros)}</td>` : ""}<td><b>${moeda(l.total)}</b></td></tr>`).join("")}
+      ${(r.descontos || []).map((l) => `<tr class="neg"><td>(−) ${esc(l.rotulo)}${l.dias ? ` <span class="mudo">(${l.dias} dias)</span>` : ""}</td><td>${moeda(l.devido)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td>${r.modo === "atrasados" ? `<td>${moeda(l.juros)}</td>` : ""}<td><b>− ${moeda(l.total)}</b></td></tr>`).join("")}</tbody>
+      <tfoot><tr><th>${r.descontos?.length ? "Total líquido" : "Total"}</th><th>${moeda(r.vencidas.devido)}</th><th></th><th>${moeda(r.vencidas.corrigido)}</th>${r.modo === "atrasados" ? `<th>${moeda(r.vencidas.juros)}</th>` : ""}<th>${moeda(r.vencidas.total)}</th></tr></tfoot>
     </table></div>
     ${r.reajustes.length ? `<p class="peq mudo" style="margin-top:8px">Reajustes aplicados: ${r.reajustes.map((x) => `${x.ano}: ${pct(x.percentual, 2)}% (${moeda(x.valor)})`).join("; ")}.</p>` : ""}
     </details>
@@ -1207,7 +1266,8 @@ function metodologia(C) {
       nenhum: "Sem juros de mora.", um: "Juros de mora simples de 1% ao mês, proporcionais aos dias.", meio: "Juros de mora simples de 0,5% ao mês, proporcionais aos dias.",
       legal: "Juros de mora pela taxa legal do art. 406 do Código Civil divulgada pelo Banco Central (Resolução CMN nº 5.171/2024), proporcionais aos dias.",
     }[r.juros];
-    return [reg, jur + (p.jurosDesde && r.juros !== "nenhum" ? ` Termo inicial dos juros: ${dBR(p.jurosDesde)}.` : r.juros !== "nenhum" ? " Termo inicial dos juros: data de cada valor." : ""),
+    const pg = r.pagos?.length ? ["Valores recebidos atualizados pelos mesmos critérios de correção e juros desde a data de cada pagamento e abatidos do débito na data do cálculo."] : [];
+    return [...pg, reg, jur + (p.jurosDesde && r.juros !== "nenhum" ? ` Termo inicial dos juros: ${dBR(p.jurosDesde)}.` : r.juros !== "nenhum" ? " Termo inicial dos juros: data de cada valor." : ""),
       "Índices negativos de deflação são aplicados sem reduzir o valor nominal."];
   }
   const e = ESPECIES[p.especie];
@@ -1217,6 +1277,7 @@ function metodologia(C) {
     p.decimoTerceiro ? "Abono anual calculado sobre a renda de dezembro, ou do último mês do período, à razão de 1/12 por mês com 15 dias ou mais de benefício." : "Sem abono anual.",
     "Correção monetária conforme o Manual de Cálculos da Justiça Federal (Resolução CJF nº 990/2026): INPC até novembro de 2021; taxa SELIC, acumulada de forma simples, de dezembro de 2021 a agosto de 2025 (art. 3º da EC nº 113/2021, na redação original); INPC a partir de setembro de 2025. Índices contados do mês do vencimento de cada parcela até o mês anterior ao do cálculo; a deflação não reduz o valor nominal.",
   ];
+  if (r.descontos?.length) base.push("Valores já recebidos no período (" + (p.descontos || []).map((d) => `${d.descricao || "benefício"} de ${dBR(d.inicio)} a ${dBR(d.fim)}, ${d.modo === "sm" ? "um salário mínimo" : moeda(d.valor)} por mês${d.decimo ? ", com abono anual" : ""}`).join("; ") + ") abatidos mês a mês, com a mesma correção e os mesmos juros das parcelas devidas.");
   if (r.modo === "atrasados") base.push(p.citacao ? `Juros de mora desde a citação (${dBR(p.citacao)}): até novembro de 2021, os juros aplicados à caderneta de poupança; de dezembro de 2021 a agosto de 2025, englobados na SELIC; a partir de setembro de 2025, taxa legal correspondente ao fator SELIC do mês deduzido o INPC do mês anterior, sem valores negativos.` : "Sem juros de mora (data da citação não informada).");
   else base.push(`Parcelas vencidas até o mês anterior ao do ajuizamento, atualizadas até ${dBR(p.ajuizamento)}.${r.vincendas ? ` Vincendas: ${r.vincendas.parcelas}${r.vincendas.decimo ? " parcelas e um abono anual" : " parcelas"} pela renda da competência do ajuizamento (art. 292, §§ 1º e 2º, do CPC).` : ""}`);
   return base;
@@ -1232,16 +1293,21 @@ function imprimirMemoria(C) {
     const t = r.totais;
     tabela = `<table><thead><tr><th>Descrição</th><th>Data</th><th>Valor original</th><th>Fator de correção</th><th>Valor corrigido</th><th>Juros (%)</th><th>Juros</th><th>Total</th></tr></thead>
       <tbody>${r.linhas.map((l) => `<tr><td>${e(l.descricao || "-")}</td><td>${dBR(l.data)}</td><td>${moeda(l.valor)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td><td>${pct(l.taxaJuros, 4)}</td><td>${moeda(l.juros)}</td><td>${moeda(l.total)}</td></tr>`).join("")}</tbody>
-      <tfoot><tr><th colspan="2">Soma</th><th>${moeda(t.valor)}</th><th></th><th>${moeda(t.corrigido)}</th><th></th><th>${moeda(t.juros)}</th><th>${moeda(t.subtotal)}</th></tr></tfoot></table>`;
+      <tfoot><tr><th colspan="2">Soma do débito</th><th>${moeda(t.valor)}</th><th></th><th>${moeda(t.corrigido)}</th><th></th><th>${moeda(t.juros)}</th><th>${moeda(t.debito ?? t.subtotal)}</th></tr></tfoot></table>
+      ${r.pagos?.length ? `<p><b>Valores recebidos (abatidos)</b></p><table><thead><tr><th>Descrição</th><th>Data</th><th>Valor recebido</th><th>Fator de correção</th><th>Valor corrigido</th><th>Juros (%)</th><th>Juros</th><th>Total</th></tr></thead>
+      <tbody>${r.pagos.map((l) => `<tr><td>${e(l.descricao || "Valor recebido")}</td><td>${dBR(l.data)}</td><td>${moeda(l.valor)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td><td>${pct(l.taxaJuros, 4)}</td><td>${moeda(l.juros)}</td><td>${moeda(l.total)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><th colspan="2">Soma dos recebidos</th><th>${moeda(t.pagoValor)}</th><th></th><th></th><th></th><th></th><th>${moeda(t.pago)}</th></tr></tfoot></table>` : ""}`;
     resumo = `<tr><td>Principal corrigido</td><td>${moeda(t.corrigido)}</td></tr><tr><td>Juros de mora</td><td>${moeda(t.juros)}</td></tr>
+      ${t.pago ? `<tr><td>(−) Valores recebidos, atualizados</td><td>${moeda(t.pago)}</td></tr><tr><td>Saldo devedor</td><td>${moeda(t.subtotal)}</td></tr>` : ""}
       ${t.multa ? `<tr><td>Multa (${String(p.multa).replace(".", ",")}%)</td><td>${moeda(t.multa)}</td></tr>` : ""}${t.honorarios ? `<tr><td>Honorários (${String(p.honorarios).replace(".", ",")}%)</td><td>${moeda(t.honorarios)}</td></tr>` : ""}
       <tr class="tot"><td>Total em ${dBR(r.dataCalculo)}</td><td>${moeda(t.total)}</td></tr>`;
   } else {
     const at = r.modo === "atrasados";
     tabela = `<table><thead><tr><th>Competência</th><th>Renda mensal</th><th>Valor devido</th><th>Fator de atualização</th><th>Valor corrigido</th>${at ? "<th>Juros</th>" : ""}<th>Total</th></tr></thead>
-      <tbody>${r.linhas.map((l) => `<tr><td>${e(l.rotulo)}${l.dias ? ` (${l.dias} dias)` : ""}</td><td>${moeda(l.base)}</td><td>${moeda(l.devido)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td>${at ? `<td>${moeda(l.juros)}</td>` : ""}<td>${moeda(l.total)}</td></tr>`).join("")}</tbody>
-      <tfoot><tr><th colspan="2">Soma das vencidas</th><th>${moeda(r.vencidas.devido)}</th><th></th><th>${moeda(r.vencidas.corrigido)}</th>${at ? `<th>${moeda(r.vencidas.juros)}</th>` : ""}<th>${moeda(r.vencidas.total)}</th></tr></tfoot></table>`;
-    resumo = `<tr><td>Parcelas vencidas atualizadas</td><td>${moeda(r.vencidas.total)}</td></tr>
+      <tbody>${r.linhas.map((l) => `<tr><td>${e(l.rotulo)}${l.dias ? ` (${l.dias} dias)` : ""}</td><td>${moeda(l.base)}</td><td>${moeda(l.devido)}</td><td>${pct(l.fator, 6)}</td><td>${moeda(l.corrigido)}</td>${at ? `<td>${moeda(l.juros)}</td>` : ""}<td>${moeda(l.total)}</td></tr>`).join("")}
+      ${(r.descontos || []).map((l) => `<tr><td>(−) ${e(l.rotulo)}${l.dias ? ` (${l.dias} dias)` : ""}</td><td>${moeda(l.base)}</td><td>−${moeda(l.devido)}</td><td>${pct(l.fator, 6)}</td><td>−${moeda(l.corrigido)}</td>${at ? `<td>−${moeda(l.juros)}</td>` : ""}<td>−${moeda(l.total)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><th colspan="2">${r.descontos?.length ? "Soma líquida das vencidas" : "Soma das vencidas"}</th><th>${moeda(r.vencidas.devido)}</th><th></th><th>${moeda(r.vencidas.corrigido)}</th>${at ? `<th>${moeda(r.vencidas.juros)}</th>` : ""}<th>${moeda(r.vencidas.total)}</th></tr></tfoot></table>`;
+    resumo = `${r.descontos?.length ? `<tr><td>Parcelas vencidas atualizadas (bruto)</td><td>${moeda(r.bruto.total)}</td></tr><tr><td>(−) Valores já recebidos, atualizados</td><td>${moeda(r.descontosTotal.total)}</td></tr>` : ""}<tr><td>Parcelas vencidas atualizadas${r.descontos?.length ? " (líquido)" : ""}</td><td>${moeda(r.vencidas.total)}</td></tr>
       ${r.vincendas ? `<tr><td>Parcelas vincendas (${r.vincendas.parcelas}${r.vincendas.decimo ? " + abono anual" : ""} × ${moeda(r.vincendas.valorMensal)})</td><td>${moeda(r.vincendas.total)}</td></tr>` : ""}
       <tr class="tot"><td>${at ? `Total em ${dBR(r.dataCalculo)}` : "Valor da causa"}</td><td>${moeda(r.total)}</td></tr>
       ${!at ? `<tr><td>Limite do JEF (60 salários mínimos de ${moeda(r.salarioMinimo)})</td><td>${moeda(r.tetoJEF)}</td></tr>` : ""}`;
@@ -1294,11 +1360,13 @@ async function planilhaCalculo(C) {
   if (r.tipo === "atualizacao") {
     linhas.push(["Descrição", "Data", "Valor original", "Fator de correção", "Valor corrigido", "Juros (%)", "Juros", "Total"]);
     r.linhas.forEach((l) => linhas.push([l.descricao, dBR(l.data), l.valor, Number(l.fator.toFixed(6)), l.corrigido, Number(l.taxaJuros.toFixed(4)), l.juros, l.total]));
+    (r.pagos || []).forEach((l) => linhas.push(["(−) " + (l.descricao || "Valor recebido"), dBR(l.data), -l.valor, Number(l.fator.toFixed(6)), -l.corrigido, Number(l.taxaJuros.toFixed(4)), -l.juros, -l.total]));
     const t = r.totais;
-    linhas.push([], ["Principal corrigido", "", "", "", t.corrigido], ["Juros", "", "", "", t.juros], ["Multa", "", "", "", t.multa], ["Honorários", "", "", "", t.honorarios], ["Total", "", "", "", t.total]);
+    linhas.push([], ["Principal corrigido", "", "", "", t.corrigido], ["Juros", "", "", "", t.juros], ...(t.pago ? [["(−) Recebidos atualizados", "", "", "", -t.pago], ["Saldo devedor", "", "", "", t.subtotal]] : []), ["Multa", "", "", "", t.multa], ["Honorários", "", "", "", t.honorarios], ["Total", "", "", "", t.total]);
   } else {
     linhas.push(["Competência", "Renda mensal", "Dias", "Valor devido", "Fator de atualização", "Valor corrigido", "Juros", "Total"]);
     r.linhas.forEach((l) => linhas.push([l.rotulo, l.base, l.dias || "", l.devido, Number(l.fator.toFixed(6)), l.corrigido, l.juros, l.total]));
+    (r.descontos || []).forEach((l) => linhas.push(["(−) " + l.rotulo, l.base, l.dias || "", -l.devido, Number(l.fator.toFixed(6)), -l.corrigido, -l.juros, -l.total]));
     linhas.push([], ["Vencidas", "", "", r.vencidas.devido, "", r.vencidas.corrigido, r.vencidas.juros, r.vencidas.total]);
     if (r.vincendas) linhas.push([`Vincendas (${r.vincendas.parcelas}${r.vincendas.decimo ? " + 13º" : ""} × ${moeda(r.vincendas.valorMensal)})`, "", "", "", "", "", "", r.vincendas.total]);
     linhas.push(["Total", "", "", "", "", "", "", r.total]);
@@ -1375,7 +1443,7 @@ async function telaMovimentacoes() {
           <div class="sec"><span class="tag tag-oculto">${NOME_TRIB(p.numero)}</span> ${esc(p.numero)}</div></div>
         <div class="mov-ult">${p.ultima_mov_em ? `<span class="peq mudo">${dataBR(p.ultima_mov_em)}</span> ${novas[p.id] ? `<span class="tag tag-prazo">${novas[p.id]} nova${novas[p.id] === 1 ? "" : "s"}</span>` : ""}<div>${esc(p.ultima_mov || "")}</div>` : `<span class="peq mudo">${p.datajud_em ? "sem movimentação" : "ainda sem dados no DataJud"}</span>`}
           ${p.tribunal_orgao || p.tribunal_classe ? `<div class="sec">${esc([p.tribunal_classe, p.tribunal_orgao].filter(Boolean).join(" · "))}</div>` : ""}</div>
-        <div class="mov-bot"><button class="btn btn-sec btn-peq" data-ver-mov="${p.id}">Ver</button></div>
+        <div class="mov-bot">${c?.drive_url ? `<a class="btn-drive" href="${esc(c.drive_url)}" target="_blank" rel="noopener">Drive</a> ` : ""}<button class="btn btn-sec btn-peq" data-ver-mov="${p.id}">Ver</button></div>
         <div class="mov-det" id="det-${p.id}" hidden></div>
       </div>`;
     }).join("") : `<div class="vazio" style="border:0">${sel.value === "novas" ? "Nenhuma movimentação nova. Escolha \u201cTodos\u201d para ver a lista completa." : "Nenhum processo encontrado."}</div>`;
@@ -1436,6 +1504,445 @@ async function telaMovimentacoes() {
   desenhar();
 }
 
+// ================= JURISPRUDÊNCIA =================
+const TRIBUNAIS_J = ["TJSC", "STJ", "STF", "TRF4", "TNU", "TJPR", "TRT12", "TST", "TJRS"];
+const TIPOS_J = { acordao: "Acórdão", sumula: "Súmula", tema: "Tema repetitivo / repercussão geral", irdr: "IRDR", iac: "IAC", enunciado: "Enunciado", decisao: "Decisão monocrática" };
+const dataCit = (d, sep = "-") => (d ? d.split("-").reverse().join(sep) : "");
+
+function citacaoJ(j) {
+  if (j.tipo === "sumula") return `Súmula n. ${j.numero || ""} do ${j.tribunal}`;
+  if (j.tipo === "tema") return `Tema n. ${j.numero || ""} do ${j.tribunal}`;
+  if (j.tipo === "irdr") return `IRDR n. ${j.numero || ""} (${j.tribunal})`;
+  if (j.tipo === "iac") return `IAC n. ${j.numero || ""} (${j.tribunal})`;
+  if (j.tipo === "enunciado") return `Enunciado n. ${j.numero || ""} (${j.tribunal})`;
+  const partes = [j.tribunal, [j.classe, j.numero ? "n. " + j.numero : ""].filter(Boolean).join(" "), j.relator ? "rel. " + j.relator : "", j.orgao, j.data_julgamento ? "j. " + dataCit(j.data_julgamento, j.tribunal === "TJSC" ? "-" : "/") : ""];
+  return "(" + partes.filter(Boolean).join(", ") + ")";
+}
+
+// Lê a citação padrão do tribunal colada junto com a ementa
+function extrairJulgado(texto) {
+  const t = String(texto || "").replace(/\r/g, "").trim();
+  const r = { ementa: t };
+  const dataISO = (s) => { const m = String(s).match(/(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
+  // TJSC: (TJSC, Apelação n. 5000000-00.2020.8.24.0002, do Tribunal de Justiça de Santa Catarina, rel. Fulano, Quarta Câmara de Direito Civil, j. 10-03-2025).
+  let m = t.match(/\((TJSC|TJPR|TJRS|TRF4|STJ|STF)\s*,\s*([^,()]+?)\s+n[º°.]*\s*([\d.\-\/]+)\s*,(?:\s*do\s+Tribunal[^,]*,)?\s*rel(?:ator[a]?)?\.?\s*(?:Des(?:a|embargador[a]?)?\.?\s*|Min(?:istr[oa])?\.?\s*|Juiz[a]?\s*)?([^,]+),\s*([^,]+?),\s*j\.?\s*([\d\-\/.]+)\s*\)\.?/i);
+  if (m) {
+    Object.assign(r, { tribunal: m[1].toUpperCase(), classe: m[2].trim(), numero: m[3].trim(), relator: m[4].trim(), orgao: m[5].trim(), data_julgamento: dataISO(m[6]) });
+    r.ementa = t.replace(m[0], "").trim();
+  } else {
+    // STJ/STF: (REsp n. 1.234.567/SC, relator Ministro Fulano, Terceira Turma, julgado em 1/2/2024, DJe de 5/2/2024.)
+    m = t.match(/\(([A-Za-zÀ-ú ]+?)\s+n[º°.]*\s*([\d.\-\/A-Z]+)\s*,\s*relator[a]?\s+(?:Ministr[oa]\s+)?([^,]+),\s*([^,]+),\s*julgado em\s*([\d\/.\-]+)[^)]*\)\.?/i);
+    if (m) {
+      Object.assign(r, { tribunal: /^(RE|ARE|ADI|ADPF|HC|RHC|MS)\b/.test(m[1]) && /STF/i.test(t) ? "STF" : "STJ", classe: m[1].trim(), numero: m[2].trim(), relator: "Min. " + m[3].trim(), orgao: m[4].trim(), data_julgamento: dataISO(m[5]) });
+      r.ementa = t.replace(m[0], "").trim();
+    } else {
+      const cnj = t.match(/\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/);
+      if (cnj) r.numero = cnj[0];
+      const rel = t.match(/Rel(?:ator[a]?)?\.?\s*:?\s*(?:Des(?:a|embargador[a]?)?\.?\s*)?([A-ZÀ-Ú][^,\n;]+)/);
+      if (rel) r.relator = rel[1].trim();
+      const dj = t.match(/(?:julgado em|j\.)\s*(\d{1,2}[-\/.]\d{1,2}[-\/.]\d{4})/i);
+      if (dj) r.data_julgamento = dataISO(dj[1]);
+      const cam = t.match(/((?:Primeira|Segunda|Terceira|Quarta|Quinta|Sexta|Sétima|Oitava|\d+ª)\s+(?:Câmara|Turma)[^,\n;)]*)/i);
+      if (cam) r.orgao = cam[1].trim();
+    }
+  }
+  const cl = (r.ementa.match(/^\s*(APELAÇÃO CÍVEL|APELAÇÃO CRIMINAL|AGRAVO DE INSTRUMENTO|AGRAVO INTERNO|RECURSO INOMINADO|EMBARGOS DE DECLARAÇÃO|HABEAS CORPUS|MANDADO DE SEGURANÇA|RECURSO EM SENTIDO ESTRITO)/i) || [])[1];
+  if (!r.classe && cl) r.classe = cl.charAt(0) + cl.slice(1).toLowerCase();
+  r.ementa = r.ementa.replace(/\n{3,}/g, "\n\n").trim();
+  return r;
+}
+
+async function copiarJulgado(j, soCitacao) {
+  if (!j.conferido && !confirm("Este julgado ainda não foi marcado como conferido no site do tribunal. Copiar mesmo assim?")) return;
+  const cit = citacaoJ(j);
+  const texto = soCitacao ? cit : `${j.ementa} ${cit}`;
+  const html = soCitacao ? esc(cit) : `<p style="text-align:justify"><i>${esc(j.ementa).replace(/\n/g, "<br>")}</i> ${esc(cit)}</p>`;
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "text/plain": new Blob([texto], { type: "text/plain" }), "text/html": new Blob([html], { type: "text/html" }) })]);
+  } catch {
+    try { await navigator.clipboard.writeText(texto); } catch { return toast("Não consegui copiar.", true); }
+  }
+  toast(soCitacao ? "Citação copiada." : "Ementa copiada em itálico, com a citação. Cole na petição.");
+}
+
+async function telaJurisprudencia() {
+  const F = (S.jurisF ||= { q: "", area: "", tribunal: "", tipo: "", conferidos: false });
+  const proc = S.jurisProc ? S.proc[S.jurisProc] : null;
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <div class="barra"><div><h1>Jurisprudência</h1><p class="mudo peq">Banco de julgados do escritório. Só cite na petição o que estiver marcado como conferido no site do tribunal.</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="j-tjsc">Pesquisar no site do TJSC</button><button class="btn btn-primario" id="j-novo">+ Novo julgado</button></div></div>
+    <form id="j-form" class="j-busca" autocomplete="off">
+      <input type="search" name="q" value="${esc(F.q)}" placeholder='Ex.: pensão acidente de trânsito · "dano moral" · gratuidade -empresa · nº do processo' aria-label="Buscar">
+      <button class="btn btn-primario" type="submit">Buscar</button>
+    </form>
+    <div class="j-filtros">
+      <select id="j-area" aria-label="Área"><option value="">Todas as áreas</option>${Object.entries(AREAS).map(([k, a]) => `<option value="${k}" ${F.area === k ? "selected" : ""}>${a[0]}</option>`).join("")}</select>
+      <select id="j-trib" aria-label="Tribunal"><option value="">Todos os tribunais</option>${TRIBUNAIS_J.map((t) => `<option ${F.tribunal === t ? "selected" : ""}>${t}</option>`).join("")}</select>
+      <select id="j-tipo" aria-label="Tipo"><option value="">Todos os tipos</option>${Object.entries(TIPOS_J).map(([k, t]) => `<option value="${k}" ${F.tipo === k ? "selected" : ""}>${t}</option>`).join("")}</select>
+      <label class="check" style="margin:0"><input type="checkbox" id="j-conf" ${F.conferidos ? "checked" : ""}><span>Só conferidos</span></label>
+    </div>
+    ${proc ? `<div class="aviso aviso-info peq" style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center">Julgados vinculados ao processo <b>${esc(proc.titulo)}</b> de ${esc(S.cli[proc.cliente_id]?.nome || "")}<button class="btn btn-sec btn-peq" id="j-sem-proc">Ver todos</button></div>` : ""}
+    <div id="j-res"><div class="carregando" style="padding:30px">Buscando...</div></div>
+  </div>`;
+  const form = app.querySelector("#j-form");
+  const buscar = async () => {
+    F.q = form.elements.q.value.trim();
+    F.area = app.querySelector("#j-area").value; F.tribunal = app.querySelector("#j-trib").value;
+    F.tipo = app.querySelector("#j-tipo").value; F.conferidos = app.querySelector("#j-conf").checked;
+    const box = app.querySelector("#j-res");
+    const r = await db.rpc("jurisprudencia_buscar", { p_q: F.q, p_area: F.area || null, p_tribunal: F.tribunal || null, p_tipo: F.tipo || null, p_conferidos: F.conferidos, p_processo: S.jurisProc || null });
+    if (r.error) { box.innerHTML = `<div class="aviso aviso-erro">${esc(r.error.message)}. Confira se o script 13 (jurisprudência) foi executado no Supabase.</div>`; return; }
+    const lista = r.data || [];
+    box.innerHTML = `<p class="peq mudo" style="margin:4px 0 10px">${lista.length} julgado${lista.length === 1 ? "" : "s"}${lista.length === 200 ? " (mostrando os 200 mais relevantes)" : ""}</p>` + (lista.length ? lista.map((j) => {
+      const longa = (j.ementa || "").length > 700;
+      return `<article class="j-card">
+        <div class="j-topo">${tagArea(j.area)} <span class="tag tag-oculto">${esc(j.tribunal)}</span> ${j.tipo !== "acordao" ? `<span class="tag tag-audiencia">${esc(TIPOS_J[j.tipo])}</span>` : ""}
+          ${j.conferido ? `<span class="tag j-ok" title="Conferido em ${j.conferido_em ? dataBR(j.conferido_em) : ""}">conferido</span>` : '<span class="tag tag-prazo">conferir antes de citar</span>'}</div>
+        ${j.tese ? `<h3 class="j-tese">${esc(j.tese)}</h3>` : ""}
+        <div class="j-ementa ${longa ? "curta" : ""}" data-em="${j.id}">${esc(j.ementa)}</div>
+        ${longa ? `<button class="mais" style="padding:2px 0 6px" data-expandir="${j.id}">Ler ementa completa</button>` : ""}
+        <div class="j-cit">${esc(citacaoJ(j))}</div>
+        ${j.tags?.length ? `<div class="j-tags">${j.tags.map((t) => `<button type="button" class="j-tag" data-tag="${esc(t)}">${esc(t)}</button>`).join("")}</div>` : ""}
+        ${j.observacoes ? `<p class="peq mudo" style="white-space:pre-line;margin-top:6px"><b>Nota interna:</b> ${esc(j.observacoes)}</p>` : ""}
+        <div class="j-botoes">
+          <button class="btn btn-primario btn-peq" data-copiar-j="${j.id}">Copiar ementa + citação</button>
+          <button class="btn btn-sec btn-peq" data-citar-j="${j.id}">Copiar só a citação</button>
+          ${j.link ? `<a class="btn btn-sec btn-peq" href="${esc(j.link)}" target="_blank" rel="noopener">Inteiro teor</a>` : ""}
+          <button class="btn btn-sec btn-peq" data-usar-j="${j.id}">Usar em processo</button>
+          <button class="btn btn-sec btn-peq" data-editar-j="${j.id}">Editar</button>
+        </div>
+      </article>`;
+    }).join("") : `<div class="vazio">${F.q || F.area || F.tribunal || F.tipo || S.jurisProc ? "Nenhum julgado encontrado com esses filtros." : "O banco ainda está vazio. Pesquise no site do TJSC, copie a ementa com a citação e clique em “+ Novo julgado”."}</div>`);
+    const achar = (id) => lista.find((x) => x.id === id);
+    box.querySelectorAll("[data-expandir]").forEach((b) => (b.onclick = () => { box.querySelector(`[data-em="${b.dataset.expandir}"]`).classList.remove("curta"); b.remove(); }));
+    box.querySelectorAll("[data-copiar-j]").forEach((b) => (b.onclick = () => copiarJulgado(achar(b.dataset.copiarJ), false)));
+    box.querySelectorAll("[data-citar-j]").forEach((b) => (b.onclick = () => copiarJulgado(achar(b.dataset.citarJ), true)));
+    box.querySelectorAll("[data-editar-j]").forEach((b) => (b.onclick = () => dialogoJulgado(achar(b.dataset.editarJ), buscar)));
+    box.querySelectorAll("[data-usar-j]").forEach((b) => (b.onclick = () => dialogoUsarJulgado(achar(b.dataset.usarJ))));
+    box.querySelectorAll("[data-tag]").forEach((b) => (b.onclick = () => { form.elements.q.value = `"${b.dataset.tag}"`; buscar(); }));
+  };
+  form.addEventListener("submit", (e) => { e.preventDefault(); buscar(); });
+  ["#j-area", "#j-trib", "#j-tipo", "#j-conf"].forEach((s) => app.querySelector(s).addEventListener("change", buscar));
+  app.querySelector("#j-novo").onclick = () => dialogoJulgado({}, buscar);
+  app.querySelector("#j-sem-proc")?.addEventListener("click", () => { S.jurisProc = null; telaJurisprudencia(); });
+  app.querySelector("#j-tjsc").onclick = async () => {
+    const q = form.elements.q.value.trim();
+    if (q) { try { await navigator.clipboard.writeText(q); toast("Termos copiados. Cole na busca do TJSC."); } catch {} }
+    window.open("https://www.tjsc.jus.br/web/jurisprudencia", "_blank", "noopener");
+  };
+  buscar();
+}
+
+function dialogoJulgado(j, depois) {
+  const novo = !j.id;
+  abrir(`
+  <form novalidate><h2>${novo ? "Novo julgado" : "Editar julgado"}</h2>
+    ${novo ? `<div class="campo"><label for="jd-colar">Cole a ementa com a citação do tribunal</label><textarea id="jd-colar" style="min-height:110px" placeholder="Copie do site do TJSC a ementa inteira, incluindo a linha final (TJSC, Apelação n. ..., rel. ..., ... Câmara ..., j. ...). Os campos abaixo são preenchidos sozinhos."></textarea>
+      <button type="button" class="btn btn-sec btn-peq" id="jd-ler" style="justify-self:start">Preencher os campos</button></div>` : ""}
+    <div class="grade">
+      <div class="campo c2"><label for="jd-trib">Tribunal</label><select id="jd-trib" name="tribunal">${TRIBUNAIS_J.map((t) => `<option ${(j.tribunal || "TJSC") === t ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+      <div class="campo c2"><label for="jd-tipo">Tipo</label><select id="jd-tipo" name="tipo">${Object.entries(TIPOS_J).map(([k, t]) => `<option value="${k}" ${(j.tipo || "acordao") === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+      <div class="campo c2"><label for="jd-area">Área</label><select id="jd-area" name="area"><option value="">Sem área</option>${Object.entries(AREAS).map(([k, a]) => `<option value="${k}" ${j.area === k ? "selected" : ""}>${a[0]}</option>`).join("")}</select></div>
+      <div class="campo c3"><label for="jd-classe">Classe</label><input id="jd-classe" name="classe" type="text" value="${esc(j.classe || "")}" placeholder="Apelação"></div>
+      <div class="campo c3"><label for="jd-num">Número</label><input id="jd-num" name="numero" type="text" value="${esc(j.numero || "")}"></div>
+      <div class="campo c3"><label for="jd-rel">Relator</label><input id="jd-rel" name="relator" type="text" value="${esc(j.relator || "")}"></div>
+      <div class="campo c3"><label for="jd-org">Órgão julgador</label><input id="jd-org" name="orgao" type="text" value="${esc(j.orgao || "")}" placeholder="Quarta Câmara de Direito Civil"></div>
+      <div class="campo c2"><label for="jd-data">Data do julgamento</label><input id="jd-data" name="data_julgamento" type="date" value="${esc(j.data_julgamento || "")}"></div>
+      <div class="campo c4"><label for="jd-link">Link do inteiro teor</label><input id="jd-link" name="link" type="url" value="${esc(j.link || "")}"></div>
+    </div>
+    <div class="campo"><label for="jd-tese">Tese em uma frase</label><input id="jd-tese" name="tese" type="text" value="${esc(j.tese || "")}" placeholder="Ex.: Pensão mensal devida à família da vítima de acidente de trânsito até a idade provável de 75 anos"></div>
+    <div class="campo"><label for="jd-ementa">Ementa</label><textarea id="jd-ementa" name="ementa" style="min-height:150px" required>${esc(j.ementa || "")}</textarea></div>
+    <div class="campo"><label for="jd-tags">Palavras-chave</label><input id="jd-tags" name="tags" type="text" value="${esc((j.tags || []).join(", "))}" placeholder="separadas por vírgula: pensão, acidente, lucros cessantes"></div>
+    <div class="campo"><label for="jd-obs">Nota interna</label><textarea id="jd-obs" name="observacoes" style="min-height:56px" placeholder="Ex.: usado no caso Kelly; câmara favorável ao consumidor">${esc(j.observacoes || "")}</textarea></div>
+    <label class="check"><input type="checkbox" name="conferido" ${j.conferido ? "checked" : ""}><span><b>Conferi no site do tribunal</b> o número, o relator, a data e a ementa.</span></label>
+    <div class="dlg-botoes">
+      ${novo ? "" : '<button type="button" class="btn btn-perigo btn-peq" id="jd-excluir">Excluir</button>'}
+      <div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div>
+    </div>
+  </form>`, async (f) => {
+    const ementa = val(f, "ementa");
+    if (!ementa) return toast("Cole a ementa.", true);
+    if (!urlOk(val(f, "link"))) return toast("O link deve começar com https://", true);
+    const dados = { tribunal: val(f, "tribunal"), tipo: val(f, "tipo"), area: val(f, "area") || null, classe: val(f, "classe") || null, numero: val(f, "numero") || null,
+      relator: val(f, "relator") || null, orgao: val(f, "orgao") || null, data_julgamento: val(f, "data_julgamento") || null, link: val(f, "link") || null,
+      tese: val(f, "tese") || null, ementa, tags: val(f, "tags").split(",").map((t) => t.trim().toLowerCase()).filter(Boolean), observacoes: val(f, "observacoes") || null,
+      conferido: f.elements.conferido.checked };
+    const r = novo ? await db.from("jurisprudencia").insert(dados).select().single() : await db.from("jurisprudencia").update(dados).eq("id", j.id).select().single();
+    if (r.error) return toast(/jurisprudencia_unica/.test(r.error.message) ? "Esse julgado já está no banco." : r.error.message, true);
+    dlg.close(); toast("Julgado salvo."); depois && depois();
+  }, true);
+  const f = dlg.querySelector("form");
+  dlg.querySelector("#jd-ler")?.addEventListener("click", () => {
+    const x = extrairJulgado(dlg.querySelector("#jd-colar").value);
+    if (!x.ementa) return toast("Cole o texto primeiro.", true);
+    if (x.tribunal && TRIBUNAIS_J.includes(x.tribunal)) f.elements.tribunal.value = x.tribunal;
+    for (const k of ["classe", "numero", "relator", "orgao", "data_julgamento", "ementa"]) if (x[k]) f.elements[k].value = x[k];
+    const achou = ["numero", "relator", "orgao", "data_julgamento"].filter((k) => x[k]).length;
+    toast(achou >= 3 ? "Campos preenchidos. Confira e escreva a tese." : "Preenchi o que consegui. Complete os campos que faltaram.");
+  });
+  dlg.querySelector("#jd-excluir")?.addEventListener("click", async () => {
+    if (!confirm("Excluir este julgado do banco?")) return;
+    const r = await db.from("jurisprudencia").delete().eq("id", j.id);
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); toast("Excluído."); depois && depois();
+  });
+}
+
+function dialogoUsarJulgado(j) {
+  const ops = S.processos.filter((p) => !p.arquivado).map((p) => ({ id: p.id, rot: `${S.cli[p.cliente_id]?.nome || ""} · ${p.titulo}${p.numero ? " · " + p.numero : ""}` }))
+    .sort((a, b) => a.rot.localeCompare(b.rot, "pt-BR"));
+  abrir(`<form novalidate><h2>Usar em processo</h2>
+    <p class="peq mudo" style="margin:-8px 0 12px">${esc(j.tese || citacaoJ(j))}</p>
+    <div class="campo"><label for="uj-p">Processo</label><input id="uj-p" name="p" type="search" list="uj-lista" required placeholder="Digite o cliente ou o número">
+      <datalist id="uj-lista">${ops.map((o) => `<option value="${esc(o.rot)}"></option>`).join("")}</datalist></div>
+    <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Vincular</button></div></div></form>`, async (f) => {
+    const o = ops.find((x) => x.rot === val(f, "p"));
+    if (!o) return toast("Escolha um processo da lista.", true);
+    const r = await db.from("jurisprudencia_processos").insert({ jurisprudencia_id: j.id, processo_id: o.id });
+    if (r.error && !/duplicate|unique/i.test(r.error.message)) return toast(r.error.message, true);
+    dlg.close(); toast("Julgado vinculado ao processo.");
+  });
+}
+
+// ================= DESPESAS DO ESCRITÓRIO =================
+const CATEGORIAS_DESP = ["Aluguel", "Energia e água", "Internet e telefone", "Sistemas e assinaturas", "Custas processuais", "Perícias e assistentes técnicos",
+  "Cartório e certidões", "Diligências e deslocamento", "Combustível", "Correios", "Material de escritório", "Contador", "OAB e anuidades",
+  "Impostos e taxas", "Marketing e site", "Pessoal", "Manutenção", "Outros"];
+const FORMAS_DESP = ["Pix", "Cartão de crédito", "Cartão de débito", "Boleto", "Transferência", "Dinheiro", "Débito automático"];
+const MESES_NOME = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const mesRotulo = (m) => { const [a, mm] = m.split("-").map(Number); return MESES_NOME[mm - 1].replace(/^./, (x) => x.toUpperCase()) + " de " + a; };
+const mesSomar = (m, n) => { const [a, mm] = m.split("-").map(Number); const d = new Date(Date.UTC(a, mm - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+const fimMes = (m) => { const [a, mm] = m.split("-").map(Number); return new Date(Date.UTC(a, mm, 0)).toISOString().slice(0, 10); };
+
+async function telaDespesas() {
+  const F = (S.despF ||= { mes: HOJE().slice(0, 7), categoria: "", status: "", q: "" });
+  const ini = F.mes + "-01", fim = fimMes(F.mes);
+  app.innerHTML = '<div class="carregando">Carregando despesas...</div>';
+  const [dq, pq, rq, aq] = await Promise.all([
+    db.from("despesas").select("*").gte("data", ini).lte("data", fim).order("data", { ascending: false }),
+    db.from("parcelas").select("valor,pago_em").gte("pago_em", ini).lte("pago_em", fim),
+    db.from("despesas").select("*").eq("reembolsavel", true).eq("reembolsado", false).order("data", { ascending: false }).limit(200),
+    db.from("despesas").select("valor,data,pago").gte("data", mesSomar(F.mes, -5) + "-01").lte("data", fim),
+  ]);
+  if (dq.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc(dq.error.message)}. Confira se o script 14 (despesas) foi executado no Supabase.</div></div>`);
+  const todas = dq.data;
+  const hoje = HOJE();
+  const soma = (l) => l.reduce((s, d) => s + Number(d.valor), 0);
+  const pagas = todas.filter((d) => d.pago), abertas = todas.filter((d) => !d.pago);
+  const vencidas = abertas.filter((d) => d.data < hoje);
+  const recebido = soma(pq.data || []);
+  const resultado = recebido - soma(pagas);
+  const aReembolsar = (rq.data || []);
+  const porCat = {};
+  todas.forEach((d) => (porCat[d.categoria] = (porCat[d.categoria] || 0) + Number(d.valor)));
+  const cats = Object.entries(porCat).sort((a, b) => b[1] - a[1]);
+  const maxCat = cats.length ? cats[0][1] : 1;
+  const totalMes = soma(todas);
+  // evolução dos últimos 6 meses
+  const meses6 = Array.from({ length: 6 }, (_, i) => mesSomar(F.mes, i - 5));
+  const porMes = Object.fromEntries(meses6.map((m) => [m, 0]));
+  (aq.data || []).forEach((d) => { const m = d.data.slice(0, 7); if (m in porMes) porMes[m] += Number(d.valor); });
+  const max6 = Math.max(1, ...Object.values(porMes));
+
+  const lista = todas.filter((d) => (!F.categoria || d.categoria === F.categoria)
+    && (!F.status || (F.status === "pago" ? d.pago : F.status === "aberto" ? !d.pago : F.status === "reembolso" ? d.reembolsavel && !d.reembolsado : true))
+    && (!F.q || norm([d.descricao, d.fornecedor, d.categoria, d.observacoes, S.cli[d.cliente_id]?.nome].join(" ")).includes(norm(F.q))));
+
+  app.innerHTML = `
+  <div class="wrap painel-corpo">
+    <div class="barra"><div><h1>Despesas</h1><p class="mudo peq">Lance as despesas do escritório. As marcadas como "repete todo mês" são lançadas de novo com um clique.</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="dp-xlsx">Exportar Excel</button><button class="btn btn-primario" id="dp-nova">+ Nova despesa</button></div></div>
+    <div class="mes-nav"><button class="btn btn-sec btn-peq" id="dp-ant" aria-label="Mês anterior">◀</button><b>${mesRotulo(F.mes)}</b><button class="btn btn-sec btn-peq" id="dp-prox" aria-label="Próximo mês">▶</button>
+      ${F.mes !== HOJE().slice(0, 7) ? '<button class="btn btn-sec btn-peq" id="dp-hoje">Mês atual</button>' : ""}
+      <button class="btn btn-sec btn-peq" id="dp-rec" title="Lança neste mês as despesas marcadas como recorrentes">Lançar recorrentes do mês</button></div>
+
+    <form class="dp-rapida" id="dp-rapida" autocomplete="off">
+      <input name="descricao" type="text" placeholder="Lançamento rápido: descrição" aria-label="Descrição" required>
+      <input name="valor" type="text" data-mask="moeda" inputmode="decimal" placeholder="R$ 0,00" aria-label="Valor" required>
+      <select name="categoria" aria-label="Categoria">${CATEGORIAS_DESP.map((c) => `<option>${c}</option>`).join("")}</select>
+      <input name="data" type="date" value="${F.mes === hoje.slice(0, 7) ? hoje : ini}" aria-label="Data">
+      <button class="btn btn-primario" type="submit">Lançar</button>
+    </form>
+
+    <div class="cards">
+      <div class="card-num"><div class="n">${moeda(totalMes)}</div><div class="l">despesas do mês (${todas.length})</div></div>
+      <div class="card-num"><div class="n">${moeda(soma(pagas))}</div><div class="l">pagas</div></div>
+      <div class="card-num ${vencidas.length ? "alerta" : abertas.length ? "aviso" : ""}"><div class="n">${moeda(soma(abertas))}</div><div class="l">a pagar${vencidas.length ? ` (${vencidas.length} vencida${vencidas.length === 1 ? "" : "s"})` : ""}</div></div>
+      <div class="card-num"><div class="n">${moeda(recebido)}</div><div class="l">honorários recebidos no mês</div></div>
+      <div class="card-num ${resultado < 0 ? "alerta" : ""}"><div class="n">${moeda(resultado)}</div><div class="l">resultado (recebido menos pago)</div></div>
+      <div class="card-num ${aReembolsar.length ? "aviso" : ""}"><div class="n">${moeda(soma(aReembolsar))}</div><div class="l">adiantado para clientes, a reembolsar</div></div>
+    </div>
+
+    <div class="colunas">
+      <div class="bloco"><h2 style="margin-bottom:10px">Por categoria</h2>
+        ${cats.length ? `<div class="lista dp-cats">${cats.map(([c, v]) => `<button type="button" class="dp-cat ${F.categoria === c ? "sel" : ""}" data-cat="${esc(c)}">
+          <span class="nome">${esc(c)}</span><span class="barra-v"><i style="width:${Math.max(3, (v / maxCat) * 100)}%"></i></span><span class="v">${moeda(v)} <small>${totalMes ? Math.round((v / totalMes) * 100) : 0}%</small></span></button>`).join("")}</div>`
+          : '<div class="vazio peq">Sem despesas neste mês.</div>'}
+      </div>
+      <div class="bloco"><h2 style="margin-bottom:10px">Últimos 6 meses</h2>
+        <div class="dp-meses">${meses6.map((m) => `<button type="button" class="dp-mes ${m === F.mes ? "sel" : ""}" data-mes="${m}" title="${mesRotulo(m)}: ${moeda(porMes[m])}">
+          <span class="col"><i style="height:${Math.max(2, (porMes[m] / max6) * 100)}%"></i></span><span class="v">${porMes[m] ? moeda(porMes[m]).replace(/,\d\d$/, "") : "-"}</span><span class="m">${MESES_NOME[Number(m.slice(5)) - 1].slice(0, 3)}</span></button>`).join("")}</div>
+      </div>
+    </div>
+
+    <div class="barra" style="margin-top:6px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;flex:1">
+        <input type="search" id="dp-busca" value="${esc(F.q)}" placeholder="Buscar descrição, fornecedor ou cliente" aria-label="Buscar" style="max-width:300px">
+        <select id="dp-cat" style="width:auto" aria-label="Categoria"><option value="">Todas as categorias</option>${CATEGORIAS_DESP.map((c) => `<option ${F.categoria === c ? "selected" : ""}>${c}</option>`).join("")}</select>
+        <select id="dp-status" style="width:auto" aria-label="Situação"><option value="">Todas</option><option value="pago" ${F.status === "pago" ? "selected" : ""}>Pagas</option><option value="aberto" ${F.status === "aberto" ? "selected" : ""}>A pagar</option><option value="reembolso" ${F.status === "reembolso" ? "selected" : ""}>A reembolsar</option></select>
+      </div>
+      <span class="peq mudo">${lista.length} lançamento${lista.length === 1 ? "" : "s"} · ${moeda(soma(lista))}</span>
+    </div>
+    ${lista.length ? `<div class="lista">${lista.map((d) => {
+      const c = d.cliente_id && S.cli[d.cliente_id];
+      const venc = !d.pago && d.data < hoje;
+      return `<div class="item dp-item ${d.pago ? "" : venc ? "vencida" : "aberta"}">
+        <div class="dp-data"><b>${d.data.slice(8)}</b><small>${MESES_NOME[Number(d.data.slice(5, 7)) - 1].slice(0, 3)}</small></div>
+        <div class="principal" style="flex:1"><b>${esc(d.descricao)}</b> <span class="tag tag-oculto">${esc(d.categoria)}</span>${d.recorrente ? ' <span class="tag tag-audiencia" title="Repete todo mês">mensal</span>' : ""}${d.origem_id ? ' <span class="tag tag-oculto" title="Lançada a partir de uma recorrente">recorrente</span>' : ""}
+          <div class="sec">${[esc(d.fornecedor || ""), esc(d.forma || ""), c ? `cliente: <a href="#cliente/${c.id}">${esc(c.nome)}</a>${d.reembolsavel ? (d.reembolsado ? " (reembolsada)" : " (a reembolsar)") : ""}` : "", esc(d.observacoes || "")].filter(Boolean).join(" · ")}</div></div>
+        <div class="dp-valor"><b>${moeda(d.valor)}</b><small class="${d.pago ? "ok" : venc ? "err" : "warn"}">${d.pago ? "paga" : venc ? "vencida" : "a pagar"}</small></div>
+        <div class="dir">
+          ${d.comprovante_url ? `<a class="btn btn-sec btn-peq" href="${esc(d.comprovante_url)}" target="_blank" rel="noopener">Comprovante</a>` : ""}
+          ${d.pago ? "" : `<button class="btn btn-primario btn-peq" data-dp-pagar="${d.id}">Paga</button>`}
+          ${d.reembolsavel && !d.reembolsado ? `<button class="btn btn-sec btn-peq" data-dp-reemb="${d.id}">Reembolsada</button>` : ""}
+          <button class="btn btn-sec btn-peq" data-dp-editar="${d.id}">Editar</button>
+          <button class="btn btn-sec btn-peq" data-dp-dup="${d.id}" title="Lançar de novo no próximo mês">Repetir</button>
+        </div></div>`;
+    }).join("")}</div>` : `<div class="vazio">${todas.length ? "Nenhuma despesa com esses filtros." : "Nenhuma despesa lançada em " + mesRotulo(F.mes).toLowerCase() + ". Use o lançamento rápido acima."}</div>`}
+    ${aReembolsar.length ? `<div class="bloco" style="margin-top:24px"><h2 style="margin-bottom:10px">Adiantado para clientes, a reembolsar (todos os meses)</h2><div class="lista">${aReembolsar.map((d) => {
+      const c = d.cliente_id && S.cli[d.cliente_id];
+      return `<div class="item"><div class="principal"><b>${esc(d.descricao)}</b> · ${moeda(d.valor)}<div class="sec">${dBR(d.data)}${c ? ` · <a href="#cliente/${c.id}">${esc(c.nome)}</a>` : ""}${d.processo_id && S.proc[d.processo_id] ? " · " + esc(S.proc[d.processo_id].titulo) : ""}</div></div>
+        <div class="dir">${c?.whatsapp ? botaoWhats(c.whatsapp, `Olá, ${primeiroNome(c.nome)}! Aqui é do escritório Charles Borges Advocacia. Adiantamos ${moeda(d.valor)} referente a ${d.descricao} no seu processo. Podemos combinar o reembolso?`, "Cobrar") : ""}<button class="btn btn-sec btn-peq" data-dp-reemb="${d.id}">Reembolsada</button></div></div>`;
+    }).join("")}</div></div>` : ""}
+  </div>`;
+
+  const ir = (m) => { F.mes = m; telaDespesas(); };
+  app.querySelector("#dp-ant").onclick = () => ir(mesSomar(F.mes, -1));
+  app.querySelector("#dp-prox").onclick = () => ir(mesSomar(F.mes, 1));
+  app.querySelector("#dp-hoje")?.addEventListener("click", () => ir(HOJE().slice(0, 7)));
+  app.querySelectorAll("[data-mes]").forEach((b) => (b.onclick = () => ir(b.dataset.mes)));
+  app.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { F.categoria = F.categoria === b.dataset.cat ? "" : b.dataset.cat; telaDespesas(); }));
+  app.querySelector("#dp-cat").onchange = (e) => { F.categoria = e.target.value; telaDespesas(); };
+  app.querySelector("#dp-status").onchange = (e) => { F.status = e.target.value; telaDespesas(); };
+  let tBusca;
+  app.querySelector("#dp-busca").oninput = (e) => { clearTimeout(tBusca); tBusca = setTimeout(() => { F.q = e.target.value; telaDespesas().then(() => { const i = app.querySelector("#dp-busca"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }, 350); };
+  app.querySelector("#dp-nova").onclick = () => dialogoDespesa({ data: F.mes === HOJE().slice(0, 7) ? HOJE() : ini }, telaDespesas);
+  app.querySelector("#dp-rec").onclick = async () => {
+    const r = await db.rpc("despesas_gerar_recorrentes", { p_mes: ini });
+    if (r.error) return toast(r.error.message, true);
+    toast(r.data ? `${r.data} despesa(s) recorrente(s) lançada(s) como "a pagar".` : "As recorrentes deste mês já estão lançadas.");
+    telaDespesas();
+  };
+  const fr = app.querySelector("#dp-rapida");
+  fr.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const valor = numBR(fr.elements.valor.value);
+    if (!fr.elements.descricao.value.trim() || !valor) return toast("Informe a descrição e o valor.", true);
+    const r = await db.from("despesas").insert({ descricao: fr.elements.descricao.value.trim(), valor, categoria: fr.elements.categoria.value, data: fr.elements.data.value || HOJE(), pago: true });
+    if (r.error) return toast(r.error.message, true);
+    toast("Despesa lançada."); S.despUltCat = fr.elements.categoria.value;
+    if ((fr.elements.data.value || HOJE()).slice(0, 7) !== F.mes) F.mes = (fr.elements.data.value || HOJE()).slice(0, 7);
+    await telaDespesas(); app.querySelector("#dp-rapida [name=descricao]")?.focus();
+  });
+  if (S.despUltCat) fr.elements.categoria.value = S.despUltCat;
+  // sugere a categoria pelo que foi digitado
+  fr.elements.descricao.addEventListener("input", () => { const c = categoriaSugerida(fr.elements.descricao.value); if (c) fr.elements.categoria.value = c; });
+  const achar = (id) => todas.find((x) => x.id === id) || aReembolsar.find((x) => x.id === id);
+  app.querySelectorAll("[data-dp-pagar]").forEach((b) => (b.onclick = async () => {
+    const r = await db.from("despesas").update({ pago: true }).eq("id", b.dataset.dpPagar); if (r.error) return toast(r.error.message, true); toast("Marcada como paga."); telaDespesas();
+  }));
+  app.querySelectorAll("[data-dp-reemb]").forEach((b) => (b.onclick = async () => {
+    const r = await db.from("despesas").update({ reembolsado: true }).eq("id", b.dataset.dpReemb); if (r.error) return toast(r.error.message, true); toast("Marcada como reembolsada."); telaDespesas();
+  }));
+  app.querySelectorAll("[data-dp-editar]").forEach((b) => (b.onclick = () => dialogoDespesa(achar(b.dataset.dpEditar), telaDespesas)));
+  app.querySelectorAll("[data-dp-dup]").forEach((b) => (b.onclick = async () => {
+    const d = achar(b.dataset.dpDup);
+    const prox = mesSomar(d.data.slice(0, 7), 1);
+    const dia = Math.min(Number(d.data.slice(8)), Number(fimMes(prox).slice(8)));
+    const { id, criado_em, atualizado_em, criado_por, recorrente, origem_id, ...resto } = d;
+    const r = await db.from("despesas").insert({ ...resto, data: `${prox}-${String(dia).padStart(2, "0")}`, pago: false, reembolsado: false, comprovante_url: null });
+    if (r.error) return toast(r.error.message, true);
+    toast(`Lançada em ${mesRotulo(prox).toLowerCase()} como "a pagar".`);
+  }));
+  app.querySelector("#dp-xlsx").onclick = async () => {
+    try { await carregarXLSX(); } catch { return toast("Não consegui carregar o gerador de planilhas.", true); }
+    const linhas = [["Despesas · " + mesRotulo(F.mes)], [], ["Data", "Descrição", "Categoria", "Fornecedor", "Forma", "Situação", "Cliente", "Valor"]];
+    todas.slice().sort((a, b) => a.data.localeCompare(b.data)).forEach((d) => linhas.push([dBR(d.data), d.descricao, d.categoria, d.fornecedor || "", d.forma || "", d.pago ? "paga" : "a pagar", S.cli[d.cliente_id]?.nome || "", Number(d.valor)]));
+    linhas.push([], ["", "", "", "", "", "", "Total", totalMes], ["", "", "", "", "", "", "Pagas", soma(pagas)], ["", "", "", "", "", "", "A pagar", soma(abertas)], [], ["Por categoria"], ...cats.map(([c, v]) => [c, "", "", "", "", "", "", v]));
+    const ws = XLSX.utils.aoa_to_sheet(linhas);
+    ws["!cols"] = [{ wch: 11 }, { wch: 34 }, { wch: 24 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 24 }, { wch: 12 }];
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Despesas");
+    XLSX.writeFile(wb, "despesas-" + F.mes + ".xlsx");
+  };
+}
+
+function categoriaSugerida(t) {
+  const s = norm(t);
+  const regras = [[/aluguel|locacao/, "Aluguel"], [/luz|energia|celesc|agua|casan|saneamento/, "Energia e água"], [/internet|telefone|celular|vivo|claro|tim\b|oi\b|fibra/, "Internet e telefone"],
+    [/astrea|sistema|assinatura|software|google|microsoft|adobe|supabase|dominio|locaweb|resend|claude|chatgpt/, "Sistemas e assinaturas"],
+    [/custas|guia|grj|drj|preparo|taxa judiciaria|distribuicao/, "Custas processuais"], [/pericia|perito|assistente tecnico|laudo/, "Perícias e assistentes técnicos"],
+    [/cartorio|certidao|registro|matricula|reconhecimento de firma|autentica/, "Cartório e certidões"], [/combustivel|gasolina|diesel|posto/, "Combustível"],
+    [/pedagio|viagem|diaria|hotel|onibus|uber|estacionamento|diligencia/, "Diligências e deslocamento"], [/correio|sedex|ar\b|carta registrada/, "Correios"],
+    [/papel|toner|impressora|caneta|material/, "Material de escritório"], [/contador|contabil/, "Contador"], [/oab|anuidade|caasc/, "OAB e anuidades"],
+    [/imposto|iss|irpf|das\b|simples|iptu|taxa/, "Impostos e taxas"], [/marketing|anuncio|instagram|impulsion|site/, "Marketing e site"],
+    [/salario|estagiari|funcionari|secretari|inss patronal|fgts/, "Pessoal"], [/manutencao|conserto|reparo|limpeza/, "Manutenção"]];
+  for (const [re, c] of regras) if (re.test(s)) return c;
+  return "";
+}
+
+function dialogoDespesa(d, depois) {
+  const novo = !d.id;
+  const nomes = S.clientes.map((c) => c.nome).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const c0 = d.cliente_id ? S.cli[d.cliente_id] : null;
+  abrir(`
+  <form novalidate><h2>${novo ? "Nova despesa" : "Editar despesa"}</h2>
+    <div class="grade">
+      <div class="campo c4"><label for="dp-desc">Descrição</label><input id="dp-desc" name="descricao" type="text" required value="${esc(d.descricao || "")}" placeholder="Ex.: Custas iniciais, aluguel de outubro"></div>
+      <div class="campo c2"><label for="dp-val">Valor (R$)</label><input id="dp-val" name="valor" type="text" data-mask="moeda" inputmode="decimal" required value="${d.valor != null ? esc(numInput(d.valor)) : ""}" placeholder="0,00"></div>
+      <div class="campo c3"><label for="dp-catg">Categoria</label><select id="dp-catg" name="categoria">${CATEGORIAS_DESP.map((c) => `<option ${(d.categoria || "Outros") === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+      <div class="campo c3"><label for="dp-data">Data</label><input id="dp-data" name="data" type="date" required value="${esc(d.data || HOJE())}"><span class="dica">Do pagamento, ou do vencimento se ainda vai pagar.</span></div>
+      <div class="campo c3"><label for="dp-forn">Fornecedor</label><input id="dp-forn" name="fornecedor" type="text" value="${esc(d.fornecedor || "")}"></div>
+      <div class="campo c3"><label for="dp-forma">Forma de pagamento</label><input id="dp-forma" name="forma" type="text" list="dp-formas" value="${esc(d.forma || "")}"><datalist id="dp-formas">${FORMAS_DESP.map((x) => `<option>${x}</option>`).join("")}</datalist></div>
+    </div>
+    <label class="check"><input type="checkbox" name="pago" ${d.pago !== false ? "checked" : ""}><span>Já está paga</span></label>
+    <label class="check"><input type="checkbox" name="recorrente" ${d.recorrente ? "checked" : ""}><span>Repete todo mês (aluguel, internet, sistemas...). Depois é só clicar em "Lançar recorrentes do mês".</span></label>
+    <fieldset><legend>Cliente (opcional)</legend>
+      <div class="campo"><label for="dp-cli">Despesa ligada a um cliente</label><input id="dp-cli" name="cliente" type="search" list="dp-clis" autocomplete="off" value="${esc(c0?.nome || "")}" placeholder="Ex.: custas ou perícia adiantadas">
+        <datalist id="dp-clis">${nomes.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist></div>
+      <label class="check"><input type="checkbox" name="reembolsavel" ${d.reembolsavel ? "checked" : ""}><span>O cliente vai reembolsar</span></label>
+      ${d.reembolsavel ? `<label class="check"><input type="checkbox" name="reembolsado" ${d.reembolsado ? "checked" : ""}><span>Já foi reembolsada</span></label>` : ""}
+    </fieldset>
+    <div class="campo"><label for="dp-comp">Comprovante (link do Drive)</label><input id="dp-comp" name="comprovante_url" type="url" value="${esc(d.comprovante_url || "")}" placeholder="https://drive.google.com/..."></div>
+    <div class="campo"><label for="dp-obs">Observação</label><textarea id="dp-obs" name="observacoes" style="min-height:56px">${esc(d.observacoes || "")}</textarea></div>
+    <div class="dlg-botoes">
+      ${novo ? "" : '<button type="button" class="btn btn-perigo btn-peq" id="dp-excluir">Excluir</button>'}
+      <div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div>
+    </div>
+  </form>`, async (f) => {
+    const valor = numBR(val(f, "valor"));
+    if (!val(f, "descricao") || !valor) return toast("Informe a descrição e o valor.", true);
+    if (!urlOk(val(f, "comprovante_url"))) return toast("O link do comprovante deve começar com https://", true);
+    const nomeCli = val(f, "cliente");
+    const cli = nomeCli ? S.clientes.find((x) => norm(x.nome) === norm(nomeCli)) : null;
+    if (nomeCli && !cli) return toast("Cliente não encontrado. Escolha um nome da lista.", true);
+    const dados = { descricao: val(f, "descricao"), valor, categoria: val(f, "categoria"), data: val(f, "data"), fornecedor: val(f, "fornecedor") || null, forma: val(f, "forma") || null,
+      pago: f.elements.pago.checked, recorrente: f.elements.recorrente.checked, cliente_id: cli ? cli.id : null, reembolsavel: f.elements.reembolsavel.checked,
+      reembolsado: f.elements.reembolsado ? f.elements.reembolsado.checked : false, comprovante_url: val(f, "comprovante_url") || null, observacoes: val(f, "observacoes") || null };
+    const r = novo ? await db.from("despesas").insert(dados) : await db.from("despesas").update(dados).eq("id", d.id);
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); toast("Despesa salva."); depois && depois();
+  }, true);
+  const f = dlg.querySelector("form");
+  if (novo) f.elements.descricao.addEventListener("input", () => { const c = categoriaSugerida(f.elements.descricao.value); if (c) f.elements.categoria.value = c; });
+  dlg.querySelector("#dp-excluir")?.addEventListener("click", async () => {
+    if (!confirm("Excluir esta despesa?")) return;
+    const r = await db.from("despesas").delete().eq("id", d.id);
+    if (r.error) return toast(r.error.message, true);
+    dlg.close(); toast("Despesa excluída."); depois && depois();
+  });
+}
+
 // ================= PUBLICAÇÕES (DJEN, pela OAB) =================
 async function telaPublicacoes() {
   const filtro = S.filtroPub || "nao-lidas";
@@ -1470,7 +1977,7 @@ async function telaPublicacoes() {
         <div class="sec">${c ? procs.map((pp) => `<a href="#cliente/${pp.cliente_id}">${esc(S.cli[pp.cliente_id]?.nome || "")}</a> · ${esc(pp.titulo)}`).join("<br>") : '<span style="color:var(--warn)">processo não cadastrado no painel</span>'}</div>
         <div class="peq" style="margin-top:6px;white-space:pre-line" data-txt="${p.id}">${esc(longo ? p.texto.slice(0, 420) + "..." : p.texto || "")}</div>
         ${longo ? `<button class="mais" style="padding:4px 0" data-vermais="${p.id}">Ver texto completo</button>` : ""}
-        ${p.link ? `<div class="peq"><a href="${esc(p.link)}" target="_blank" rel="noopener">Abrir o documento</a></div>` : ""}
+        ${p.link || c?.drive_url ? `<div class="peq">${p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener">Abrir o documento</a>` : ""}${p.link && c?.drive_url ? " · " : ""}${c?.drive_url ? `<a href="${esc(c.drive_url)}" target="_blank" rel="noopener">Pasta do cliente no Drive</a>` : ""}</div>` : ""}
       </div><div class="dir" style="flex-direction:column;align-items:stretch">
         ${c ? `<button class="btn btn-sec btn-peq" data-mostrar="${p.id}">Mostrar ao cliente</button>` : `<button class="btn btn-primario btn-peq" data-cadastrar="${p.id}">Cadastrar processo</button>`}
         ${p.lida ? "" : `<button class="btn btn-sec btn-peq" data-lida="${p.id}">Marcar como lida</button>`}
@@ -1609,6 +2116,77 @@ async function telaEnvios() {
 }
 
 // ================= DIÁLOGOS =================
+
+// ================= máscaras e campos interativos =================
+function padraoNum(d, p) { let out = "", i = 0; for (const ch of p) { if (i >= d.length) break; if (ch === "0") out += d[i++]; else out += ch; } return out; }
+const MASCARA = {
+  cpf: (d) => padraoNum(d.slice(0, 11), "000.000.000-00"),
+  cnpj: (d) => padraoNum(d.slice(0, 14), "00.000.000/0000-00"),
+  cep: (d) => padraoNum(d.slice(0, 8), "00000-000"),
+  cnj: (d) => padraoNum(d.slice(0, 20), "0000000-00.0000.0.00.0000"),
+  fone: (d) => { if (d.length > 11 && d.startsWith("55")) d = d.slice(2); d = d.slice(0, 11); return d.length > 10 ? padraoNum(d, "(00) 0 0000-0000") : padraoNum(d, "(00) 0000-0000"); },
+};
+function formatarMoedaCampo(el) { const n = numBR(el.value); el.value = n ? n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : el.value.trim() ? "" : ""; }
+function avisoCampo(el, html, tipo) {
+  const box = el.closest(".campo") || el.parentElement;
+  let s = box.querySelector(".valida");
+  if (!html) { s?.remove(); el.classList.remove("campo-ok", "campo-erro"); return; }
+  if (!s) { s = document.createElement("span"); s.className = "valida"; box.appendChild(s); }
+  s.className = "valida " + tipo; s.innerHTML = html;
+  el.classList.toggle("campo-ok", tipo === "ok"); el.classList.toggle("campo-erro", tipo === "erro");
+}
+function validarCampo(el) {
+  const m = el.dataset.mask, d = el.value.replace(/\D/g, "");
+  if (m === "cpf") {
+    if (d.length < 11) return avisoCampo(el, "");
+    if (!cpfValido(el.value)) return avisoCampo(el, "CPF inválido. Confira os números.", "erro");
+    const outro = S.clientes.find((c) => c.id !== el.dataset.cliente && String(c.cpf || "").replace(/\D/g, "") === d);
+    return avisoCampo(el, outro ? `Já cadastrado: <a href="#cliente/${outro.id}" data-fechar>${esc(outro.nome)}</a>` : "CPF válido ✓", outro ? "erro" : "ok");
+  }
+  if (m === "fone") {
+    if (!d) return avisoCampo(el, "");
+    if (d.length < 10) return avisoCampo(el, "Faltam números (DDD + telefone).", "erro");
+    return avisoCampo(el, el.name === "whatsapp" ? `<a href="${linkWhats(normalizaWhats(d), "")}" target="_blank" rel="noopener">Testar no WhatsApp</a>` : "", "ok");
+  }
+  if (m === "cnj") {
+    if (!d) return avisoCampo(el, "");
+    return d.length === 20 ? avisoCampo(el, `Número completo ✓${NOME_TRIB(d) ? " · " + NOME_TRIB(d) : ""}`, "ok") : avisoCampo(el, "O número CNJ tem 20 dígitos.", "erro");
+  }
+  if (m === "drive") {
+    const v = el.value.trim();
+    if (!v) return avisoCampo(el, "");
+    if (!/^https:\/\/\S+$/i.test(v)) return avisoCampo(el, "O link deve começar com https://", "erro");
+    return avisoCampo(el, `<a href="${esc(v)}" target="_blank" rel="noopener">Abrir a pasta</a>${/drive\.google\.com|docs\.google\.com/.test(v) ? "" : " · não parece um link do Google Drive"}`, /drive\.google\.com|docs\.google\.com/.test(v) ? "ok" : "erro");
+  }
+  if (m === "email") {
+    const v = el.value.trim();
+    if (!v) return avisoCampo(el, "");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)) return avisoCampo(el, "E-mail incompleto.", "erro");
+    const outro = S.clientes.find((c) => c.id !== el.dataset.cliente && String(c.email || "").toLowerCase() === v.toLowerCase());
+    return avisoCampo(el, outro ? `Já usado por <a href="#cliente/${outro.id}" data-fechar>${esc(outro.nome)}</a>` : "", outro ? "erro" : "ok");
+  }
+}
+function aplicarMascara(el) {
+  const m = el.dataset.mask;
+  if (MASCARA[m]) { const d = el.value.replace(/\D/g, ""); if (d || el.value) el.value = MASCARA[m](d); }
+}
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (!el.dataset || !el.dataset.mask) return;
+  if (MASCARA[el.dataset.mask]) {
+    const fim = el.selectionStart === el.value.length;
+    aplicarMascara(el);
+    if (fim) el.setSelectionRange(el.value.length, el.value.length);
+  } else if (el.dataset.mask === "moeda") {
+    el.value = el.value.replace(/[^\d.,]/g, "");
+  }
+  validarCampo(el);
+});
+document.addEventListener("focusout", (e) => { const el = e.target; if (el.dataset && el.dataset.mask === "moeda" && el.value) formatarMoedaCampo(el); });
+function prepararCampos(raiz) {
+  raiz.querySelectorAll("[data-mask]").forEach((el) => { if (el.value) { aplicarMascara(el); if (el.dataset.mask === "moeda") formatarMoedaCampo(el); validarCampo(el); } });
+}
+
 function abrir(html, aoEnviar, grande = false) {
   dlg.className = grande ? "grande" : "";
   dlg.innerHTML = html;
@@ -1619,6 +2197,8 @@ function abrir(html, aoEnviar, grande = false) {
     try { await aoEnviar(f); } finally { b.disabled = false; }
   });
   dlg.querySelectorAll("[data-fechar]").forEach((b) => (b.onclick = () => dlg.close()));
+  dlg.addEventListener("click", (e) => { if (e.target.closest(".valida a[data-fechar]")) dlg.close(); });
+  prepararCampos(dlg);
   dlg.showModal();
   dlg.querySelector("input:not([type=hidden]),select,textarea")?.focus();
 }
@@ -1648,8 +2228,8 @@ function dialogoFicha(c) {
     <fieldset><legend>Identificação</legend><div class="grade">
       <div class="campo c2"><label for="f-tipo_pessoa">Tipo</label><select id="f-tipo_pessoa" name="tipo_pessoa"><option value="pf" ${!pj ? "selected" : ""}>Pessoa física</option><option value="pj" ${pj ? "selected" : ""}>Pessoa jurídica</option></select></div>
       <div class="campo c4"><label for="f-nome" id="rot-nome">${pj ? "Razão social" : "Nome completo"}</label><input id="f-nome" name="nome" type="text" required value="${esc(c.nome)}"></div>
-      <div class="so-pf campo c2"><label for="f-cpf">CPF</label><input id="f-cpf" name="cpf" type="text" inputmode="numeric" value="${esc(c.cpf)}"></div>
-      <div class="so-pj campo c2"><label for="f-cnpj">CNPJ</label><input id="f-cnpj" name="cnpj" type="text" inputmode="numeric" value="${esc(c.cnpj)}"></div>
+      <div class="so-pf campo c2"><label for="f-cpf">CPF</label><input id="f-cpf" name="cpf" type="text" inputmode="numeric" data-mask="cpf" data-cliente="${esc(c.id || "")}" placeholder="000.000.000-00" value="${esc(c.cpf)}"></div>
+      <div class="so-pj campo c2"><label for="f-cnpj">CNPJ</label><input id="f-cnpj" name="cnpj" type="text" inputmode="numeric" data-mask="cnpj" placeholder="00.000.000/0000-00" value="${esc(c.cnpj)}"></div>
       <div class="so-pf campo c2"><label for="f-rg">RG</label><input id="f-rg" name="rg" type="text" value="${esc(c.rg)}"></div>
       <div class="so-pf campo c2"><label for="f-rg_orgao">Órgão expedidor</label><input id="f-rg_orgao" name="rg_orgao" type="text" placeholder="IGP/SC" value="${esc(c.rg_orgao)}"></div>
       <div class="so-pf campo c2"><label for="f-sexo">Sexo</label>${SEXO("sexo", c.sexo)}</div>
@@ -1662,12 +2242,12 @@ function dialogoFicha(c) {
       <div class="so-pf campo c3"><label for="f-pai">Nome do pai</label><input id="f-pai" name="pai" type="text" value="${esc(c.pai)}"></div>
     </div></fieldset>
     <fieldset><legend>Contato</legend><div class="grade">
-      <div class="campo c6"><label for="f-email">E-mail</label><input id="f-email" name="email" type="email" value="${esc(c.email)}"><span class="dica">É por ele que o cliente entra no portal e recebe os avisos.</span></div>
-      <div class="campo c3"><label for="f-whatsapp">WhatsApp</label><input id="f-whatsapp" name="whatsapp" type="tel" placeholder="(49) 99999-9999" value="${esc(c.whatsapp ? mostraWhats(c.whatsapp) : "")}"></div>
-      <div class="campo c3"><label for="f-telefone2">Outro telefone</label><input id="f-telefone2" name="telefone2" type="tel" value="${esc(c.telefone2)}"></div>
+      <div class="campo c6"><label for="f-email">E-mail</label><input id="f-email" name="email" type="email" data-mask="email" data-cliente="${esc(c.id || "")}" value="${esc(c.email)}"><span class="dica">É por ele que o cliente entra no portal e recebe os avisos.</span></div>
+      <div class="campo c3"><label for="f-whatsapp">WhatsApp</label><input id="f-whatsapp" name="whatsapp" type="tel" data-mask="fone" placeholder="(49) 9 9999-9999" value="${esc(c.whatsapp ? mostraWhats(c.whatsapp) : "")}"></div>
+      <div class="campo c3"><label for="f-telefone2">Outro telefone</label><input id="f-telefone2" name="telefone2" type="tel" data-mask="fone" placeholder="(49) 3333-3333" value="${esc(c.telefone2)}"></div>
     </div></fieldset>
     <fieldset><legend>Endereço</legend><div class="grade">
-      <div class="campo c2"><label for="f-cep">CEP</label><input id="f-cep" name="cep" type="text" inputmode="numeric" placeholder="89970-000" value="${esc(c.cep)}"></div>
+      <div class="campo c2"><label for="f-cep">CEP</label><input id="f-cep" name="cep" type="text" inputmode="numeric" data-mask="cep" placeholder="89970-000" value="${esc(c.cep)}"></div>
       <div class="campo c4"><label for="f-logradouro">Logradouro</label><input id="f-logradouro" name="logradouro" type="text" placeholder="Linha João Café Filho" value="${esc(c.logradouro)}"></div>
       <div class="campo c1"><label for="f-numero">Nº</label><input id="f-numero" name="numero" type="text" placeholder="S/N" value="${esc(c.numero)}"></div>
       <div class="campo c2"><label for="f-complemento">Complemento</label><input id="f-complemento" name="complemento" type="text" value="${esc(c.complemento)}"></div>
@@ -1685,10 +2265,10 @@ function dialogoFicha(c) {
       <div class="campo c2"><label for="f-rep_sexo">Sexo</label>${SEXO("rep_sexo", c.rep_sexo)}</div>
       <div class="campo c2"><label for="f-rep_estado_civil">Estado civil</label>${selEC("rep_estado_civil", c.rep_estado_civil)}</div>
       ${inp("rep_profissao", "Profissão", c.rep_profissao, "", "c2")}
-      ${inp("rep_cpf", "CPF", c.rep_cpf, 'inputmode="numeric"', "c2")}${inp("rep_rg", "RG", c.rep_rg, "", "c2")}${inp("rep_rg_orgao", "Órgão", c.rep_rg_orgao, "", "c2")}
+      ${inp("rep_cpf", "CPF", c.rep_cpf, 'inputmode="numeric" data-mask="cpf" placeholder="000.000.000-00"', "c2")}${inp("rep_rg", "RG", c.rep_rg, "", "c2")}${inp("rep_rg_orgao", "Órgão", c.rep_rg_orgao, "", "c2")}
     </div></fieldset>
     <fieldset><legend>Interno</legend>
-      <div class="campo"><label for="f-drive">Pasta do cliente no Google Drive (link)</label><input id="f-drive" name="drive_url" type="url" value="${esc(c.drive_url || "")}" placeholder="https://drive.google.com/drive/folders/..."><span class="dica">Crie a pasta no Drive, clique em Compartilhar, copie o link e cole aqui.</span></div>
+      <div class="campo"><label for="f-drive">Pasta do cliente no Google Drive (link)</label><input id="f-drive" name="drive_url" type="url" data-mask="drive" value="${esc(c.drive_url || "")}" placeholder="https://drive.google.com/drive/folders/..."><span class="dica">Crie a pasta no Drive, clique em Compartilhar, copie o link e cole aqui.</span></div>
       <div class="campo"><label for="f-obs">Anotações internas</label><textarea id="f-obs" name="observacoes" placeholder="O cliente nunca vê este campo.">${esc(c.observacoes)}</textarea></div>
       ${novo ? "" : `<label class="check"><input type="checkbox" name="ativo" ${c.ativo ? "checked" : ""}><span>Cliente ativo (acessa o portal e recebe avisos)</span></label>`}
     </fieldset>
@@ -1733,9 +2313,10 @@ function dialogoFicha(c) {
   };
   f.elements.tipo_pessoa.addEventListener("change", alternar); alternar();
   // Busca de endereço pelo CEP (ViaCEP)
-  f.elements.cep.addEventListener("blur", async () => {
+  const buscarCep = async () => {
     const d = f.elements.cep.value.replace(/\D/g, "");
-    if (d.length !== 8) return;
+    if (d.length !== 8 || f.elements.cep.dataset.buscado === d) return;
+    f.elements.cep.dataset.buscado = d;
     try {
       const r = await fetch(`https://viacep.com.br/ws/${d}/json/`); const j = await r.json();
       if (j.erro) return;
@@ -1744,8 +2325,12 @@ function dialogoFicha(c) {
       if (j.localidade) f.elements.cidade.value = j.localidade;
       if (j.uf) f.elements.uf.value = j.uf;
       f.elements.cep.value = mascaraCEP(d);
+      avisoCampo(f.elements.cep, `${esc(j.localidade || "")}/${esc(j.uf || "")} ✓`, "ok");
+      (f.elements.logradouro.value ? f.elements.numero : f.elements.logradouro).focus();
     } catch { /* sem internet ou CEP inexistente: segue manual */ }
-  });
+  };
+  f.elements.cep.addEventListener("input", buscarCep);
+  f.elements.cep.addEventListener("blur", buscarCep);
   dlg.querySelector("#excluir")?.addEventListener("click", async () => {
     const n = S.processos.filter((p) => p.cliente_id === c.id).length;
     if (!confirm(`Excluir ${c.nome}${n ? ` e ${n} processo(s) com todos os eventos, honorários e documentos` : ""}? Esta ação não pode ser desfeita.\n\nSe quiser apenas bloquear o acesso, desmarque "Cliente ativo".`)) return;
@@ -1772,7 +2357,7 @@ function dialogoDocumento(c, depois) {
     <div class="campo" id="b-obj"><label for="d-obj">Objeto do contrato</label><textarea id="d-obj" name="objeto" style="min-height:70px" placeholder="ajuizamento e acompanhamento de ação previdenciária em face do INSS visando à concessão de aposentadoria por incapacidade permanente"></textarea></div>
     <div class="linha2">
       <div class="campo" id="b-perc"><label for="d-perc">Percentual (%)</label><input id="d-perc" name="percentual" type="text" inputmode="decimal" value="30"></div>
-      <div class="campo" id="b-valor"><label for="d-valor">Valor fixo (R$)</label><input id="d-valor" name="valor_fixo" type="text" inputmode="decimal" placeholder="3.000,00"></div>
+      <div class="campo" id="b-valor"><label for="d-valor">Valor fixo (R$)</label><input id="d-valor" name="valor_fixo" type="text" data-mask="moeda" inputmode="decimal" placeholder="3.000,00"></div>
     </div>
     <div class="linha2" id="b-parc">
       <div class="campo"><label for="d-np">Nº de parcelas</label><input id="d-np" name="parcelas" type="number" min="1" max="60" value="1"></div>
@@ -1857,7 +2442,7 @@ function dialogoHonorario(h, depois) {
       <div class="campo"><label for="h-proc">Processo</label><select id="h-proc" name="processo_id"><option value="">Nenhum</option>${procs.map((p) => `<option value="${p.id}" ${h.processo_id === p.id ? "selected" : ""}>${esc(p.titulo)}</option>`).join("")}</select></div>
     </div>
     <div class="linha2">
-      <div class="campo"><label for="h-valor">Valor fixo (R$)</label><input id="h-valor" name="valor_fixo" type="text" inputmode="decimal" value="${h.valor_fixo ? String(h.valor_fixo).replace(".", ",") : ""}"></div>
+      <div class="campo"><label for="h-valor">Valor fixo (R$)</label><input id="h-valor" name="valor_fixo" type="text" data-mask="moeda" inputmode="decimal" value="${h.valor_fixo ? String(h.valor_fixo).replace(".", ",") : ""}"></div>
       <div class="campo"><label for="h-perc">Percentual (%)</label><input id="h-perc" name="percentual" type="text" inputmode="decimal" value="${h.percentual ? String(h.percentual).replace(".", ",") : ""}"></div>
     </div>
     ${novo ? `<div class="linha2"><div class="campo"><label for="h-np">Nº de parcelas</label><input id="h-np" name="parcelas" type="number" min="1" max="60" value="1"></div>
@@ -1890,7 +2475,7 @@ function dialogoHonorario(h, depois) {
 function dialogoParcela(honorarioId, depois) {
   abrir(`
   <form novalidate><h2>Nova parcela</h2>
-    <div class="linha2"><div class="campo"><label for="p-v">Valor (R$)</label><input id="p-v" name="valor" type="text" inputmode="decimal" required></div>
+    <div class="linha2"><div class="campo"><label for="p-v">Valor (R$)</label><input id="p-v" name="valor" type="text" data-mask="moeda" inputmode="decimal" required></div>
       <div class="campo"><label for="p-d">Vencimento</label><input id="p-d" name="venc" type="date" value="${HOJE()}" required></div></div>
     <label class="check"><input type="checkbox" name="pago"><span>Já foi paga hoje</span></label>
     <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Cancelar</button><button type="submit" class="btn btn-primario">Salvar</button></div></div>
@@ -1933,7 +2518,7 @@ function dialogoProcesso(p) {
       <option value="">${novo ? "Identificar pelo título (automático)" : "Identificar automaticamente"}</option>
       ${Object.entries(AREAS).map(([k, a]) => `<option value="${k}" ${p.area === k ? "selected" : ""}>${a[0]}</option>`).join("")}</select></div>
     <div class="linha2">
-      <div class="campo"><label for="numero">Número do processo</label><input id="numero" name="numero" type="text" placeholder="0000000-00.0000.0.00.0000" value="${esc(p.numero)}"></div>
+      <div class="campo"><label for="numero">Número do processo</label><input id="numero" name="numero" type="text" inputmode="numeric" data-mask="cnj" placeholder="0000000-00.0000.0.00.0000" value="${esc(p.numero)}"></div>
       <div class="campo"><label for="situacao">Situação</label><input id="situacao" name="situacao" type="text" list="situacoes" value="${esc(p.situacao || "Em andamento")}">
         <datalist id="situacoes"><option>Em andamento</option><option>Aguardando audiência</option><option>Aguardando perícia</option><option>Aguardando sentença</option><option>Em fase de recurso</option><option>Em cumprimento de sentença</option><option>Suspenso</option><option>Encerrado</option></datalist></div>
     </div>
@@ -1941,7 +2526,7 @@ function dialogoProcesso(p) {
       <div class="campo"><label for="juizo">Juízo / órgão</label><input id="juizo" name="juizo" type="text" placeholder="Ex.: Vara Única de Anchieta" value="${esc(p.juizo)}"></div>
       <div class="campo"><label for="parte">Parte contrária</label><input id="parte" name="parte_contraria" type="text" value="${esc(p.parte_contraria)}"></div>
     </div>
-    <div class="campo"><label for="valor_causa">Valor da causa (R$)</label><input id="valor_causa" name="valor_causa" type="text" inputmode="decimal" placeholder="0,00" value="${p.valor_causa ? esc(Number(p.valor_causa).toLocaleString("pt-BR", { minimumFractionDigits: 2 })) : ""}"><span class="dica">Pode vir da aba Cálculos.</span></div>
+    <div class="campo"><label for="valor_causa">Valor da causa (R$)</label><input id="valor_causa" name="valor_causa" type="text" data-mask="moeda" inputmode="decimal" placeholder="0,00" value="${p.valor_causa ? esc(Number(p.valor_causa).toLocaleString("pt-BR", { minimumFractionDigits: 2 })) : ""}"><span class="dica">Pode vir da aba Cálculos.</span></div>
     <div class="campo"><label for="resumo">Resumo para o cliente</label><textarea id="resumo" name="resumo" placeholder="Explicação em linguagem simples sobre o processo.">${esc(p.resumo)}</textarea></div>
     ${novo ? "" : `<label class="check"><input type="checkbox" name="arquivado" ${p.arquivado ? "checked" : ""}><span>Processo encerrado (sai da lista principal e para de gerar avisos)</span></label>`}
     <div class="dlg-botoes">

@@ -214,8 +214,43 @@ export function calcularPrevidenciario(p, I) {
   } else if (!atrasados) {
     avisos.push("Não há parcelas vencidas no período informado.");
   }
-  const tot = (campo) => r2(linhas.reduce((s, l) => s + l[campo], 0));
-  const vencidas = { devido: tot("devido"), corrigido: tot("corrigido"), juros: tot("juros"), total: tot("total") };
+  // valores já recebidos no período (benefício inacumulável, pagamentos administrativos): abatidos mês a mês
+  const descontos = [];
+  for (const d of p.descontos || []) {
+    if (!d.inicio || !d.fim || d.fim < d.inicio) continue;
+    const a0 = d.inicio > inicio ? d.inicio : inicio, a1 = d.fim < fim ? d.fim : fim;
+    if (a0 > a1) continue;
+    const meses13 = {};
+    for (let k = mesDe(a0); k <= mesDe(a1); k++) {
+      const dm = diasNoMes(k);
+      const da = k === mesDe(a0) ? diaDe(a0) : 1, db = k === mesDe(a1) ? diaDe(a1) : dm;
+      const dias = db - da + 1;
+      const base = d.modo === "sm" ? smEm(k) || 0 : Number(d.valor) || 0;
+      const c = corrigirPrev(I, base * dias / dm, k + 1, C, dataCalc, jurosDesde, faltas);
+      descontos.push({ rotulo: (d.descricao ? d.descricao + " " : "Recebido ") + rotuloMes(k), competencia: compStr(k), base, dias: dias < dm ? dias : null, desconto: true,
+        devido: r2(base * dias / dm), fator: c.fator, corrigido: r2(c.corrigido), juros: r2(c.juros), total: r2(r2(c.corrigido) + r2(c.juros)) });
+      const ano = Math.floor(k / 12);
+      meses13[ano] ||= { n: 0, ult: k };
+      if (dias >= 15) meses13[ano].n++;
+      meses13[ano].ult = k;
+    }
+    if (d.decimo) for (const [ano, x] of Object.entries(meses13)) {
+      if (!x.n) continue;
+      const base = d.modo === "sm" ? smEm(x.ult) || 0 : Number(d.valor) || 0;
+      const c = corrigirPrev(I, base * x.n / 12, x.ult + 1, C, dataCalc, jurosDesde, faltas);
+      descontos.push({ rotulo: `${d.descricao || "Recebido"} 13º/${ano}${x.n < 12 ? ` (${x.n}/12)` : ""}`, competencia: compStr(x.ult), base, desconto: true, decimo: true,
+        devido: r2(base * x.n / 12), fator: c.fator, corrigido: r2(c.corrigido), juros: r2(c.juros), total: r2(r2(c.corrigido) + r2(c.juros)) });
+    }
+  }
+  descontos.sort((a, b) => a.competencia.localeCompare(b.competencia) || (a.decimo ? 1 : 0) - (b.decimo ? 1 : 0));
+  const somaL = (lst, campo) => r2(lst.reduce((s, l) => s + l[campo], 0));
+  const tot = (campo) => somaL(linhas, campo);
+  const bruto = { devido: tot("devido"), corrigido: tot("corrigido"), juros: tot("juros"), total: tot("total") };
+  const desc = { devido: somaL(descontos, "devido"), corrigido: somaL(descontos, "corrigido"), juros: somaL(descontos, "juros"), total: somaL(descontos, "total") };
+  const vencidas = descontos.length
+    ? { devido: r2(bruto.devido - desc.devido), corrigido: r2(bruto.corrigido - desc.corrigido), juros: r2(bruto.juros - desc.juros), total: r2(bruto.total - desc.total) }
+    : bruto;
+  if (vencidas.total < 0) avisos.push("Os valores já recebidos superam os atrasados no período informado.");
 
   // parcelas vincendas (art. 292, §§ 1º e 2º, do CPC)
   let vincendas = null;
@@ -235,7 +270,7 @@ export function calcularPrevidenciario(p, I) {
   return {
     tipo: "previdenciario", modo: atrasados ? "atrasados" : "causa",
     dataCalculo: dataCalc, periodo: { inicio, fim: inicio <= fim ? fim : null, prescritoAte },
-    linhas, vencidas, vincendas, total, reajustes,
+    linhas, vencidas, bruto, descontos, descontosTotal: desc, vincendas, total, reajustes,
     salarioMinimo: sm, tetoJEF, excedeJEF: !atrasados && total > tetoJEF,
     indicesAte: { inpc: ultimoInpc != null ? rotuloMes(ultimoInpc) : "-", selic: ultimaSelic != null ? rotuloMes(ultimaSelic) : "-" },
     avisos,
@@ -263,9 +298,8 @@ export function calcularAtualizacao(p, I) {
   let jurosModo = p.juros || "regime";
   if (jurosModo === "regime") jurosModo = regime === "lei14905" ? "regime" : "nenhum";
   const linhas = [];
-  for (const it of p.itens || []) {
+  const calcular = (it) => {
     const valor = Number(it.valor) || 0;
-    if (!it.data || !valor) continue;
     const k0 = mesDe(it.data);
     let fator = 1;
     if (regime === "lei14905") {
@@ -298,17 +332,26 @@ export function calcularAtualizacao(p, I) {
       }
     }
     const juros = corrigido * taxa;
-    linhas.push({ descricao: it.descricao || "", data: it.data, valor: r2(valor), fator, corrigido: r2(corrigido), taxaJuros: taxa * 100, juros: r2(juros), total: r2(r2(corrigido) + r2(juros)) });
-  }
-  const tot = (c) => r2(linhas.reduce((s, l) => s + l[c], 0));
-  const subtotal = tot("total");
-  const multa = r2(subtotal * (Number(p.multa) || 0) / 100);
-  const honorarios = r2(subtotal * (Number(p.honorarios) || 0) / 100);
+    return { descricao: it.descricao || "", data: it.data, valor: r2(valor), fator, corrigido: r2(corrigido), taxaJuros: taxa * 100, juros: r2(juros), total: r2(r2(corrigido) + r2(juros)) };
+  };
+  for (const it of p.itens || []) { if (it.data && Number(it.valor)) linhas.push(calcular(it)); }
+  // valores já recebidos: atualizados pelos mesmos critérios desde a data de cada pagamento e abatidos
+  const pagos = [];
+  for (const pg of p.pagamentos || []) { if (pg.data && Number(pg.valor)) pagos.push(calcular(pg)); }
+  const tot = (lst, c) => r2(lst.reduce((s, l) => s + l[c], 0));
+  const debito = tot(linhas, "total");
+  const pagoAtual = tot(pagos, "total");
+  const subtotal = r2(debito - pagoAtual);
+  if (subtotal < 0) avisos.push("Os valores recebidos, atualizados, superam o débito: há saldo a favor do devedor.");
+  const base = Math.max(subtotal, 0);
+  const multa = r2(base * (Number(p.multa) || 0) / 100);
+  const honorarios = r2(base * (Number(p.honorarios) || 0) / 100);
   if (ult > (I.ultimo.ipca ?? -1) && ["lei14905", "ipca"].includes(regime)) avisos.push(`O IPCA está publicado até ${rotuloMes(I.ultimo.ipca)}.`);
   avisos.push(...textoFaltas(faltas));
   return {
-    tipo: "atualizacao", dataCalculo: dataFim, regime, juros: jurosModo, linhas,
-    totais: { valor: tot("valor"), corrigido: tot("corrigido"), juros: tot("juros"), subtotal, multa, honorarios, total: r2(subtotal + multa + honorarios) },
+    tipo: "atualizacao", dataCalculo: dataFim, regime, juros: jurosModo, linhas, pagos,
+    totais: { valor: tot(linhas, "valor"), corrigido: tot(linhas, "corrigido"), juros: tot(linhas, "juros"), debito,
+      pagoValor: tot(pagos, "valor"), pago: pagoAtual, subtotal, multa, honorarios, total: r2(subtotal + multa + honorarios) },
     avisos,
   };
 }

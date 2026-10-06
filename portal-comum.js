@@ -57,7 +57,8 @@ export function normalizaWhats(v) {
 export function mostraWhats(d) {
   d = String(d || "");
   const m = d.match(/^55(\d{2})(\d{4,5})(\d{4})$/);
-  return m ? `(${m[1]}) ${m[2]}-${m[3]}` : d;
+  if (!m) return d;
+  return m[2].length === 5 ? `(${m[1]}) ${m[2][0]} ${m[2].slice(1)}-${m[3]}` : `(${m[1]}) ${m[2]}-${m[3]}`;
 }
 export const linkWhats = (numero, texto) => `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
 
