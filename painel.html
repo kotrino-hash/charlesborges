@@ -1977,8 +1977,8 @@ async function telaPublicacoes() {
         <div><span class="peq mudo">${p.data_disp ? dBR(p.data_disp) : ""}${p.tribunal ? " · " + esc(p.tribunal) : ""}${p.orgao ? " · " + esc(p.orgao) : ""}</span> ${p.lida ? "" : '<span class="tag tag-prazo">nova</span>'}</div>
         <div><b>${esc(p.tipo || "Comunicação")}</b> · processo ${esc(p.numero_mascara || p.numero_processo || "sem número")}</div>
         <div class="sec">${c ? procs.map((pp) => `<a href="#cliente/${pp.cliente_id}">${esc(S.cli[pp.cliente_id]?.nome || "")}</a> · ${esc(pp.titulo)}`).join("<br>") : '<span style="color:var(--warn)">processo não cadastrado no painel</span>'}</div>
-        <div class="peq" style="margin-top:6px;white-space:pre-line" data-txt="${p.id}">${esc(longo ? p.texto.slice(0, 420) + "..." : p.texto || "")}</div>
-        ${longo ? `<button class="mais" style="padding:4px 0" data-vermais="${p.id}">Ver texto completo</button>` : ""}
+        <div class="pub-texto${longo ? " recolhido" : ""}" data-txt="${p.id}">${esc(p.texto || "")}</div>
+        ${longo ? `<button class="pub-alternar" data-vermais="${p.id}" aria-expanded="false"><span>Ver texto completo</span> <i aria-hidden="true">▾</i></button>` : ""}
         ${p.link || c?.drive_url ? `<div class="peq">${p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener">Abrir o documento</a>` : ""}${p.link && c?.drive_url ? " · " : ""}${c?.drive_url ? `<a href="${esc(c.drive_url)}" target="_blank" rel="noopener">Pasta do cliente no Drive</a>` : ""}</div>` : ""}
       </div><div class="dir" style="flex-direction:column;align-items:stretch">
         ${c ? `<button class="btn btn-sec btn-peq" data-mostrar="${p.id}">Mostrar ao cliente</button>` : `<button class="btn btn-primario btn-peq" data-cadastrar="${p.id}">Cadastrar processo</button>`}
@@ -2006,8 +2006,13 @@ async function telaPublicacoes() {
     if (r3.error) toast(r3.error.message, true); telaPublicacoes();
   });
   app.querySelectorAll("[data-vermais]").forEach((b) => (b.onclick = () => {
-    const p = lista.find((x) => String(x.id) === b.dataset.vermais);
-    app.querySelector(`[data-txt="${p.id}"]`).textContent = p.texto; b.remove();
+    const caixa = app.querySelector(`[data-txt="${b.dataset.vermais}"]`);
+    const abrir = caixa.classList.contains("recolhido");
+    caixa.classList.toggle("recolhido", !abrir);
+    b.setAttribute("aria-expanded", String(abrir));
+    b.querySelector("span").textContent = abrir ? "Recolher texto" : "Ver texto completo";
+    // ao recolher um texto longo, volta a tela para o início da publicação
+    if (!abrir) { const item = b.closest(".item"); if (item && item.getBoundingClientRect().top < 0) item.scrollIntoView({ block: "start", behavior: "smooth" }); }
   }));
   app.querySelectorAll("[data-lida]").forEach((b) => (b.onclick = async () => {
     await db.from("publicacoes").update({ lida: true }).eq("id", Number(b.dataset.lida)); telaPublicacoes();
