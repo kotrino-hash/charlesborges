@@ -2274,6 +2274,16 @@ function dialogoFicha(c) {
   abrir(`
   <form novalidate>
     <h2>${novo ? "Novo cliente" : "Ficha do cliente"}</h2>
+    <div class="leitor" id="leitor">
+      <button type="button" class="leitor-zona" id="leitor-zona">
+        <span class="leitor-ico" aria-hidden="true">⇪</span>
+        <span class="leitor-txt"><b>Preencher com documentos</b>
+          <span>Arraste aqui ou clique para escolher: RG, CNH, comprovante de endereço, procuração ou o processo em PDF. Também dá para colar uma foto (Ctrl+V). A leitura é feita neste computador e os arquivos não ficam guardados.</span></span>
+      </button>
+      <input type="file" id="leitor-arq" multiple accept=".pdf,image/*" hidden>
+      <div class="leitor-status" aria-live="polite"></div>
+      <div class="leitor-res"></div>
+    </div>
     <fieldset><legend>Identificação</legend><div class="grade">
       <div class="campo c2"><label for="f-tipo_pessoa">Tipo</label><select id="f-tipo_pessoa" name="tipo_pessoa"><option value="pf" ${!pj ? "selected" : ""}>Pessoa física</option><option value="pj" ${pj ? "selected" : ""}>Pessoa jurídica</option></select></div>
       <div class="campo c4"><label for="f-nome" id="rot-nome">${pj ? "Razão social" : "Nome completo"}</label><input id="f-nome" name="nome" type="text" required value="${esc(c.nome)}"></div>
@@ -2380,6 +2390,7 @@ function dialogoFicha(c) {
   };
   f.elements.cep.addEventListener("input", buscarCep);
   f.elements.cep.addEventListener("blur", buscarCep);
+  prepararLeitor(dlg, f);
   dlg.querySelector("#excluir")?.addEventListener("click", async () => {
     const n = S.processos.filter((p) => p.cliente_id === c.id).length;
     if (!confirm(`Excluir ${c.nome}${n ? ` e ${n} processo(s) com todos os eventos, honorários e documentos` : ""}? Esta ação não pode ser desfeita.\n\nSe quiser apenas bloquear o acesso, desmarque "Cliente ativo".`)) return;
@@ -2387,6 +2398,124 @@ function dialogoFicha(c) {
     if (r.error) return toast(r.error.message, true);
     dlg.close(); toast("Cliente excluído."); await recarregarBase(); location.hash = "clientes";
   });
+}
+
+// ================= LEITOR DE DOCUMENTOS (ficha do cliente) =================
+// Lê os arquivos no navegador, mostra o que encontrou para conferência e só então preenche a ficha.
+function prepararLeitor(dlg, f) {
+  const box = dlg.querySelector("#leitor"); if (!box) return;
+  const zona = box.querySelector("#leitor-zona"), inp = box.querySelector("#leitor-arq");
+  const st = box.querySelector(".leitor-status"), res = box.querySelector(".leitor-res");
+  let mod = null;
+  const processar = async (lista) => {
+    const arqs = [...(lista || [])]; if (!arqs.length) return;
+    box.classList.add("lendo"); res.innerHTML = ""; st.textContent = "Preparando a leitura...";
+    try { mod = mod || (await import("./leitor-docs.js")); }
+    catch { box.classList.remove("lendo"); st.textContent = "Não foi possível carregar o leitor. Confira a internet e tente de novo."; return; }
+    let lidos;
+    try { lidos = await mod.lerArquivos(arqs, (m) => (st.textContent = m)); }
+    catch (e) { box.classList.remove("lendo"); st.textContent = "Erro na leitura: " + (e.message || e); return; }
+    box.classList.remove("lendo");
+    mostrarAchados(lidos, mod.extrairDados(lidos));
+  };
+  const valorAtual = (k) => {
+    const el = f.elements[k]; if (!el) return "";
+    if (k === "sexo") return "";  // sempre tem um valor padrão; não conta como preenchido
+    return (el.value || "").trim();
+  };
+  const exibir = (k, v) => k === "estado_civil" ? (ESTADOS_CIVIS[v] ? ESTADOS_CIVIS[v][0].replace(/o$/, "o(a)") : v) : k === "sexo" ? (v === "f" ? "Feminino" : "Masculino") : k === "nascimento" ? dBR(v) : k === "whatsapp" ? mostraWhats(String(v).replace(/\D/g, "").replace(/^(?!55)/, "55")) : v;
+  const mesmo = (k, a, b) => {
+    const n = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\D/g, k === "cpf" || k === "whatsapp" || k === "cep" ? "" : "$&").toUpperCase().replace(/\s+/g, " ").trim();
+    if (k === "cpf" || k === "whatsapp" || k === "cep") return String(a).replace(/\D/g, "").replace(/^55/, "") === String(b).replace(/\D/g, "").replace(/^55/, "");
+    return n(a) === n(b);
+  };
+  function controle(k, v) {
+    if (k === "estado_civil") return `<select data-k="${k}">${Object.entries(ESTADOS_CIVIS).map(([c, t]) => `<option value="${c}" ${c === v ? "selected" : ""}>${t[0].replace(/o$/, "o(a)").replace("em união estável", "União estável")}</option>`).join("")}</select>`;
+    if (k === "sexo") return `<select data-k="${k}"><option value="m" ${v !== "f" ? "selected" : ""}>Masculino</option><option value="f" ${v === "f" ? "selected" : ""}>Feminino</option></select>`;
+    if (k === "nascimento") return `<input data-k="${k}" type="date" value="${esc(v)}">`;
+    if (k === "uf") return `<select data-k="${k}">${UFS.map((u) => `<option ${u === v ? "selected" : ""}>${u}</option>`).join("")}</select>`;
+    return `<input data-k="${k}" type="text" value="${esc(k === "whatsapp" ? mostraWhats("55" + String(v).replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "")) : v)}">`;
+  }
+  function mostrarAchados(lidos, dados) {
+    const avisos = lidos.filter((x) => x.erro).map((x) => `<li>${esc(x.nome)}: ${esc(x.erro)}</li>`);
+    lidos.filter((x) => !x.erro && x.texto.replace(/\s/g, "").length < 30).forEach((x) => avisos.push(`<li>${esc(x.nome)}: não consegui ler texto. Se for foto, tente uma imagem mais nítida, reta e com boa luz.</li>`));
+    const pessoas = dados.pessoas;
+    const end = dados.endereco;
+    if (!pessoas.length && !end) {
+      st.textContent = "";
+      res.innerHTML = `<div class="leitor-card"><p><b>Não encontrei dados para a ficha nesses arquivos.</b></p>
+        <p class="peq mudo">Funciona melhor com PDF do eproc ou procuração (texto pesquisável), RG ou CNH bem fotografados e conta de luz, água ou telefone.</p>
+        ${avisos.length ? `<ul class="peq leitor-avisos">${avisos.join("")}</ul>` : ""}</div>`;
+      return;
+    }
+    st.textContent = `${lidos.length} arquivo(s) lido(s). Confira os dados antes de preencher.`;
+    let escolhida = 0;
+    const desenhar = () => {
+      const p = Object.assign({}, pessoas[escolhida] || {});
+      const fontes = Object.assign({}, p.fontes || {});
+      // o comprovante de endereço prevalece sobre o endereço escrito em outros documentos
+      const semAc = (x) => String(x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+      if (end) for (const k of ["cep", "logradouro", "numero", "complemento", "bairro", "cidade", "uf"]) {
+        if (!end[k]) continue;
+        if (p[k] && semAc(p[k]) === semAc(end[k]) && /[À-ÿ]/.test(p[k])) continue;  // mesmo endereço: fica a versão com acento
+        p[k] = end[k]; fontes[k] = end.fonte;
+      }
+      const linhas = mod.CAMPOS.filter((k) => p[k]).map((k) => {
+        const atual = valorAtual(k);
+        const igual = atual && mesmo(k, atual, p[k]);
+        const marcado = !atual || (!igual && !atual);
+        return `<tr class="${igual ? "igual" : ""}">
+          <td><input type="checkbox" data-usar="${k}" ${igual ? "disabled" : marcado ? "checked" : ""} aria-label="Usar ${esc(mod.ROTULOS[k])}"></td>
+          <th scope="row">${esc(mod.ROTULOS[k])}</th>
+          <td>${controle(k, p[k])}${atual && !igual ? `<div class="leitor-atual">na ficha: ${esc(exibir(k, atual))}</div>` : ""}${igual ? '<div class="leitor-atual">igual ao da ficha</div>' : ""}</td>
+          <td class="leitor-fonte" title="${esc(fontes[k] || "")}">${esc((fontes[k] || "").replace(/\.[a-z0-9]+$/i, ""))}</td></tr>`;
+      }).join("");
+      res.innerHTML = `<div class="leitor-card">
+        ${pessoas.length > 1 ? `<div class="leitor-pessoas"><span class="peq mudo">Encontrei ${pessoas.length} pessoas. Quem é o cliente?</span>
+          ${pessoas.map((x, i) => `<label class="leitor-pessoa"><input type="radio" name="leitor-p" value="${i}" ${i === escolhida ? "checked" : ""}><span><b>${esc(x.nome || "Sem nome")}</b>${x.cpf ? ` · CPF ${esc(x.cpf)}` : ""}${x.origem ? ` <span class="mudo peq">(${esc(x.origem)})</span>` : ""}</span></label>`).join("")}</div>` : ""}
+        <div class="leitor-tabela"><table><thead><tr><th><span class="sr">Usar</span></th><th>Campo</th><th>Encontrado</th><th>Arquivo</th></tr></thead><tbody>${linhas}</tbody></table></div>
+        ${dados.processos.length ? `<p class="peq mudo">Processo(s) no documento: ${dados.processos.map(esc).join(", ")}. Depois de salvar a ficha, cadastre em "+ Processo".</p>` : ""}
+        ${avisos.length ? `<ul class="peq leitor-avisos">${avisos.join("")}</ul>` : ""}
+        <p class="peq mudo">Dados lidos de imagem podem ter erros. Os campos que já estavam na ficha só são trocados se você marcar.</p>
+        <div class="leitor-botoes"><button type="button" class="btn btn-sec btn-peq" data-l="descartar">Descartar</button><button type="button" class="btn btn-primario btn-peq" data-l="preencher">Preencher a ficha</button></div>
+      </div>`;
+      res.querySelectorAll('[name="leitor-p"]').forEach((r) => (r.onchange = () => { escolhida = +r.value; desenhar(); }));
+      res.querySelectorAll("[data-k]").forEach((el) => el.addEventListener("input", () => { const cb = res.querySelector(`[data-usar="${el.dataset.k}"]`); if (cb && !cb.disabled) cb.checked = true; }));
+      res.querySelector('[data-l="descartar"]').onclick = () => { res.innerHTML = ""; st.textContent = ""; };
+      res.querySelector('[data-l="preencher"]').onclick = () => preencher();
+    };
+    const preencher = () => {
+      const usados = [...res.querySelectorAll("[data-usar]:checked")].map((cb) => cb.dataset.usar);
+      if (!usados.length) return toast("Marque ao menos um campo.", true);
+      if (f.elements.tipo_pessoa.value !== "pf") { f.elements.tipo_pessoa.value = "pf"; f.elements.tipo_pessoa.dispatchEvent(new Event("change")); }
+      const cep = usados.includes("cep");
+      for (const k of usados) {
+        const el = f.elements[k], src = res.querySelector(`[data-k="${k}"]`);
+        if (!el || !src) continue;
+        let v = src.value.trim();
+        if (k === "whatsapp") v = v.replace(/\D/g, "");
+        el.value = v;
+        if (k !== "cep") el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("focusout", { bubbles: true }));
+        const campo = el.closest(".campo"); if (campo) { campo.classList.remove("campo-lido"); void campo.offsetWidth; campo.classList.add("campo-lido"); }
+      }
+      // o CEP por último: a busca automática completa cidade e UF sem apagar o que veio do documento
+      if (cep) { f.elements.cep.dataset.buscado = ""; f.elements.cep.dispatchEvent(new Event("input", { bubbles: true })); }
+      res.innerHTML = ""; st.textContent = `${usados.length} campo(s) preenchido(s). Confira e clique em Salvar.`;
+      toast(`${usados.length} campo(s) preenchido(s) a partir dos documentos.`);
+      dlg.querySelector('.campo-lido input, .campo-lido select')?.focus();
+    };
+    desenhar();
+  }
+  zona.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { processar(inp.files); inp.value = ""; });
+  ["dragenter", "dragover"].forEach((ev) => zona.addEventListener(ev, (e) => { e.preventDefault(); zona.classList.add("sobre"); }));
+  ["dragleave", "drop"].forEach((ev) => zona.addEventListener(ev, () => zona.classList.remove("sobre")));
+  zona.addEventListener("drop", (e) => { e.preventDefault(); processar(e.dataTransfer.files); });
+  // soltar o arquivo em qualquer ponto da ficha também funciona
+  dlg.addEventListener("dragover", (e) => { if (e.dataTransfer?.types?.includes("Files")) e.preventDefault(); });
+  dlg.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length && !zona.contains(e.target)) { e.preventDefault(); processar(e.dataTransfer.files); } });
+  dlg.addEventListener("paste", (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); processar(fs); } });
 }
 
 function dialogoDocumento(c, depois) {
