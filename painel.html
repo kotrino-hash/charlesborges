@@ -30,7 +30,6 @@
     <button class="aba" role="tab" data-rota="movimentacoes">Movimentações</button>
     <button class="aba" role="tab" data-rota="publicacoes">Publicações</button>
     <button class="aba" role="tab" data-rota="calculos">Cálculos</button>
-    <button class="aba" role="tab" data-rota="jurisprudencia">Jurisprudência</button>
     <button class="aba" role="tab" data-rota="honorarios">Honorários</button>
     <button class="aba" role="tab" data-rota="despesas">Despesas</button>
     <button class="aba" role="tab" data-rota="envios">Avisos</button>
@@ -137,7 +136,8 @@ function rotear() {
   if (rota === "despesas") return telaDespesas();
   if (rota === "publicacoes") return telaPublicacoes();
   if (rota === "calculos") return telaCalculos();
-  if (rota === "jurisprudencia") return telaJurisprudencia();
+  // Jurisprudência desativada (busca do TJSC exige CAPTCHA). Para reativar: descomente e devolva a aba no menu.
+  // if (rota === "jurisprudencia") return telaJurisprudencia();
   if (rota === "fila") return telaFila();
   if (rota === "movimentacoes") return telaMovimentacoes();
   if (rota === "envios") return telaEnvios();
@@ -509,7 +509,6 @@ async function telaCliente(id) {
                 <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
                   <button class="btn btn-primario btn-peq" data-novo-ev="${p.id}">+ Evento</button>
                   <button class="btn btn-sec btn-peq" data-calc-proc="${p.id}">Calcular</button>
-                  <button class="btn btn-sec btn-peq" data-juris-proc="${p.id}">Jurisprudência</button>
                   <button class="btn btn-sec btn-peq" data-editar-proc="${p.id}">Editar</button>
                 </div>
               </div>
