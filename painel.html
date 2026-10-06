@@ -1951,6 +1951,9 @@ async function telaPublicacoes() {
   const [r, req] = await Promise.all([q, db.from("djen_requisicoes").select("*").order("criado_em", { ascending: false }).limit(12)]);
   if (r.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc(r.error.message)}. Confira se o script 07 (publicações) foi executado no Supabase.</div></div>`);
   let lista = r.data;
+  // Segurança extra: se alguma publicação ainda vier com acentos em código HTML (&ccedil;), converte na tela
+  const decHTML = (t) => { if (!t || !/&[#A-Za-z0-9]+;/.test(t)) return t; const el = document.createElement("textarea"); el.innerHTML = t; return el.value; };
+  lista.forEach((p) => { p.texto = decHTML(p.texto); p.orgao = decHTML(p.orgao); p.tipo = decHTML(p.tipo); });
   if (filtro === "sem-processo") lista = lista.filter((p) => !p.processo_id);
   const ult = (req.data || [])[0];
   const erros = (req.data || []).filter((x) => x.processado && x.status && x.status !== 200);
