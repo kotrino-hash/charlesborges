@@ -435,3 +435,7 @@ tr.igual .leitor-atual{color:var(--ok)}
   .leitor-fonte{display:none}
   .leitor-tabela input[type=text],.leitor-tabela input[type=date],.leitor-tabela select{min-width:0}
 }
+/* Movimentações: publicações do DJEN na linha do tempo */
+.tag-djen{background:#F3EBDD;color:var(--bronze-ink);font-weight:700;letter-spacing:.03em}
+.mov-tl li.djen .pub-cab,.mov-tl li.djen .pub-texto{margin-top:8px}
+.mov-tl li.djen .pub-texto.recolhido{max-height:6.6em}

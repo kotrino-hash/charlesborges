@@ -1411,7 +1411,7 @@ async function telaMovimentacoes() {
   app.innerHTML = `
   <div class="wrap-largo painel-corpo">
     <div class="barra"><div><h1>Movimentações dos tribunais</h1>
-      <p class="mudo peq">Consulta automática às 7h e às 13h na base oficial do CNJ (DataJud), para os ${comNumero.length} processos ativos com número. Processos em segredo de justiça não aparecem, e a base costuma ter alguns dias de atraso.</p>
+      <p class="mudo peq">Duas fontes na mesma linha do tempo, para os ${comNumero.length} processos ativos com número: as <b>publicações do DJEN</b> (intimações, despachos e decisões), que chegam no mesmo dia, de hora em hora; e o <b>DataJud</b> do CNJ, consultado a cada 2 horas das 7h às 19h, com o histórico completo do processo, mas com alguns dias de atraso. Processos em segredo de justiça não aparecem no DataJud.</p>
       <p class="peq ${falhas.length ? "" : "mudo"}" style="${falhas.length ? "color:var(--err)" : ""}">${esc(status)}</p>
       ${chaveRecusada ? `<div class="aviso aviso-erro peq" style="margin-top:6px">O CNJ recusou a chave de acesso. Abra <a href="https://datajud-wiki.cnj.jus.br/api-publica/acesso/" target="_blank" rel="noopener">datajud-wiki.cnj.jus.br/api-publica/acesso</a>, copie a chave pública e cole em "Chave do DataJud".</div>` : ""}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="dj-chave">Chave do DataJud</button><button class="btn btn-primario" id="dj-buscar">Buscar agora</button></div></div>
@@ -1440,7 +1440,7 @@ async function telaMovimentacoes() {
         <div class="mov-proc"><b>${esc(c?.nome || "")}</b> ${tagArea(p.area)}
           <div class="sec">${esc(p.titulo)}</div>
           <div class="sec"><span class="tag tag-oculto">${NOME_TRIB(p.numero)}</span> ${esc(p.numero)}</div></div>
-        <div class="mov-ult">${p.ultima_mov_em ? `<span class="peq mudo">${dataBR(p.ultima_mov_em)}</span> ${novas[p.id] ? `<span class="tag tag-prazo">${novas[p.id]} nova${novas[p.id] === 1 ? "" : "s"}</span>` : ""}<div>${esc(p.ultima_mov || "")}</div>` : `<span class="peq mudo">${p.datajud_em ? "sem movimentação" : "ainda sem dados no DataJud"}</span>`}
+        <div class="mov-ult">${p.ultima_mov_em ? `<span class="peq mudo">${dataBR(p.ultima_mov_em)}</span> ${/^Publicação no DJEN/.test(p.ultima_mov || "") ? '<span class="tag tag-djen">DJEN</span> ' : ""}${novas[p.id] ? `<span class="tag tag-prazo">${novas[p.id]} nova${novas[p.id] === 1 ? "" : "s"}</span>` : ""}<div>${esc((p.ultima_mov || "").replace(/^Publicação no DJEN: /, "Publicação: "))}</div>` : `<span class="peq mudo">${p.datajud_em ? "sem movimentação" : "ainda sem dados no DataJud"}</span>`}
           ${p.tribunal_orgao || p.tribunal_classe ? `<div class="sec">${esc([p.tribunal_classe, p.tribunal_orgao].filter(Boolean).join(" · "))}</div>` : ""}</div>
         <div class="mov-bot">${c?.drive_url ? `<a class="btn-drive" href="${esc(c.drive_url)}" target="_blank" rel="noopener">Drive</a> ` : ""}<button class="btn btn-sec btn-peq" data-ver-mov="${p.id}">Ver</button></div>
         <div class="mov-det" id="det-${p.id}" hidden></div>
@@ -1452,14 +1452,35 @@ async function telaMovimentacoes() {
     const box = app.querySelector("#det-" + pid);
     if (!box.hidden) { box.hidden = true; botao.textContent = "Ver"; return; }
     box.hidden = false; botao.textContent = "Fechar"; box.innerHTML = '<div class="peq mudo">Carregando...</div>';
-    const r = await db.from("movimentos").select("*").eq("processo_id", pid).order("data_hora", { ascending: false }).limit(20);
+    const r = await db.from("movimentos").select("*").eq("processo_id", pid).order("data_hora", { ascending: false }).order("id", { ascending: false }).limit(40);
     if (r.error) { box.innerHTML = `<div class="aviso aviso-erro">${esc(r.error.message)}</div>`; return; }
     const p = S.proc[pid];
-    box.innerHTML = r.data.length ? `<ol class="mov-tl">${r.data.map((m) => `<li class="${m.lida ? "" : "nova"}"><span class="quando">${m.data_hora ? dataBR(m.data_hora) + " " + horaBR(m.data_hora) : ""}${m.grau ? " · " + esc(m.grau) : ""}</span>
+    const itemMov = (m) => {
+      if (m.fonte === "djen") {
+        // publicação do DJEN: cabeçalho com partes e advogados + texto que abre e fecha
+        const sep = separarPublicacao({ texto: m.texto || "" });
+        const longo = sep.corpo.length > 320;
+        return `<li class="djen ${m.lida ? "" : "nova"}"><span class="quando">${m.data_hora ? dataBR(m.data_hora) : ""} · <span class="tag tag-djen">DJEN</span>${m.complemento ? " " + esc(m.complemento) : ""}</span>
+          <b>${esc((m.nome || "").replace(/^Publicação no DJEN: /, ""))}</b>
+          <button class="mais" style="padding:0 0 0 8px" data-cliente-mov="${m.id}">Mostrar ao cliente</button>
+          ${sep.partes.length ? cabecalhoPublicacao(sep) : ""}
+          ${sep.corpo ? `<div class="pub-texto${longo ? " recolhido" : ""}" data-txt="m${m.id}">${esc(sep.corpo)}</div>
+          ${longo ? `<button type="button" class="pub-alternar" data-vermais="m${m.id}" aria-expanded="false"><span>Ver texto completo</span> <i aria-hidden="true">▾</i></button>` : ""}` : ""}</li>`;
+      }
+      return `<li class="${m.lida ? "" : "nova"}"><span class="quando">${m.data_hora ? dataBR(m.data_hora) + " " + horaBR(m.data_hora) : ""}${m.grau ? " · " + esc(m.grau) : ""} · <span class="tag tag-oculto">DataJud</span></span>
         <b>${esc(m.nome || "")}</b>${m.complemento ? ` <span class="mudo">(${esc(m.complemento)})</span>` : ""}
-        <button class="mais" style="padding:0 0 0 8px" data-cliente-mov="${m.id}">Mostrar ao cliente</button></li>`).join("")}</ol>
+        <button class="mais" style="padding:0 0 0 8px" data-cliente-mov="${m.id}">Mostrar ao cliente</button></li>`;
+    };
+    box.innerHTML = r.data.length ? `<ol class="mov-tl">${r.data.map(itemMov).join("")}</ol>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"><a class="btn btn-sec btn-peq" href="#cliente/${p.cliente_id}">Abrir ficha</a>${novas[pid] ? `<button class="btn btn-sec btn-peq" data-vistas="${pid}">Marcar como vistas</button>` : ""}</div>`
-      : '<div class="peq mudo">Nenhuma movimentação recebida do DataJud para este processo.</div>';
+      : '<div class="peq mudo">Nenhuma movimentação recebida ainda (nem publicação no DJEN, nem dados do DataJud).</div>';
+    box.querySelectorAll("[data-vermais]").forEach((b2) => (b2.onclick = () => {
+      const caixa = box.querySelector(`[data-txt="${b2.dataset.vermais}"]`);
+      const abrirT = caixa.classList.contains("recolhido");
+      caixa.classList.toggle("recolhido", !abrirT);
+      b2.setAttribute("aria-expanded", String(abrirT));
+      b2.querySelector("span").textContent = abrirT ? "Recolher texto" : "Ver texto completo";
+    }));
     box.querySelector("[data-vistas]")?.addEventListener("click", async () => {
       const u = await db.from("movimentos").update({ lida: true }).eq("processo_id", pid).eq("lida", false);
       if (u.error) return toast(u.error.message, true);
@@ -1467,7 +1488,7 @@ async function telaMovimentacoes() {
     });
     box.querySelectorAll("[data-cliente-mov]").forEach((b2) => (b2.onclick = () => {
       const m = r.data.find((x) => String(x.id) === b2.dataset.clienteMov);
-      dialogoEvento({ evento: { tipo: "andamento", titulo: m.nome + (m.complemento ? " (" + m.complemento + ")" : ""), descricao: "", visivel_cliente: true, notificar: true, processo_id: pid,
+      dialogoEvento({ evento: { tipo: "andamento", titulo: m.fonte === "djen" ? (m.nome || "").replace(/^Publicação no DJEN: /, "") + " publicada no Diário da Justiça" : m.nome + (m.complemento ? " (" + m.complemento + ")" : ""), descricao: "", visivel_cliente: true, notificar: true, processo_id: pid,
         data_hora: m.data_hora }, escolherProcesso: false, depois: () => {} });
       toast("Explique ao cliente, em linguagem simples, o que essa movimentação significa.");
     }));
