@@ -439,3 +439,34 @@ tr.igual .leitor-atual{color:var(--ok)}
 .tag-djen{background:#F3EBDD;color:var(--bronze-ink);font-weight:700;letter-spacing:.03em}
 .mov-tl li.djen .pub-cab,.mov-tl li.djen .pub-texto{margin-top:8px}
 .mov-tl li.djen .pub-texto.recolhido{max-height:6.6em}
+/* ===== Perícias e audiências em destaque ===== */
+.destaque-pa{border-top:3px solid var(--bronze)}
+.pa-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:10px}
+.pa-card{display:flex;gap:14px;background:#fff;border:1px solid var(--line);border-left:5px solid var(--bronze);border-radius:6px;padding:12px 14px;min-width:0}
+.pa-card.pa-audiencia{border-left-color:var(--navy)}
+.pa-card.pa-semana{background:#FFFBF2}
+.pa-card.pa-urgente{border-left-color:var(--err);background:#FDF3F1;box-shadow:0 0 0 1px rgba(163,58,43,.18)}
+.pa-data{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;width:62px;padding:6px 0;border-radius:6px;background:var(--navy);color:#fff;line-height:1.1}
+.pa-pericia .pa-data{background:#6A4F37}
+.pa-urgente .pa-data{background:var(--err)}
+.pa-dia{font-family:var(--serif);font-size:1.7rem;font-weight:700}
+.pa-mes{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;opacity:.9}
+.pa-hora{margin-top:4px;font-size:.8rem;font-weight:700;background:rgba(255,255,255,.16);border-radius:3px;padding:1px 5px}
+.pa-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pa-quando{font-size:.78rem;font-weight:700;color:var(--bronze-ink);text-transform:uppercase;letter-spacing:.03em}
+.pa-urgente .pa-quando{color:var(--err)}
+.pa-cli{font-weight:700;font-size:1rem;overflow-wrap:anywhere}
+.pa-cli a{color:var(--ink);text-decoration:none}
+.pa-cli a:hover{text-decoration:underline}
+.pa-tit{font-size:.9rem}
+.pa-info .sec{overflow-wrap:anywhere}
+.pa-acoes{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+.item.ev-destaque{border-left:4px solid var(--bronze);background:#FFFCF6}
+.item.ev-audiencia{border-left-color:var(--navy);background:#F7F9FC}
+.selo-pa{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;font-size:.78rem;font-weight:700;background:#6A4F37;color:#fff;vertical-align:middle}
+.selo-pa.selo-audiencia{background:var(--navy)}
+.ia-sit{font-size:.84rem;font-weight:600}
+.ia-lancar,.ia-cadastrar{color:var(--ok)}
+.ia-remarcar{color:var(--warn)}
+.ia-sem_cliente{color:var(--err)}
+.ia-tabela td{vertical-align:top}

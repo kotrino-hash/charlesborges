@@ -44,6 +44,7 @@ import {
   normalizaWhats, mostraWhats, linkWhats, PORTAL_URL, montarLogin, toast
 } from "./portal-comum.js";
 import { MODELOS, ESTADOS_CIVIS, montarDados, gerarDocx, moeda, dividirParcelas, reaisExtenso, inteiroExtenso } from "./documentos.js";
+import { lerAgendaEproc, orientacaoCliente, nomeProprio } from "./agenda-eproc.js";
 import { prepararIndices, calcularPrevidenciario, calcularAtualizacao, REGIMES, JUROS, NOMES_INDICE, rotuloMes, smEm, mesDe } from "./calculos.js";
 
 const app = document.getElementById("app");
@@ -189,7 +190,8 @@ function statusAviso(ev) {
 }
 function itemEvento(e, comCliente = true) {
   const p = S.proc[e.processo_id], c = p && S.cli[p.cliente_id];
-  return `<div class="item">
+  const destaque = e.tipo === "pericia" || e.tipo === "audiencia";
+  return `<div class="item${destaque ? " ev-destaque ev-" + e.tipo : ""}">
     <div class="principal">
       <div>${e.tipo !== "andamento" ? `<span class="hora">${dataBR(e.data_hora).slice(0, 5)} ${horaBR(e.data_hora)}</span>` : `<span class="peq mudo">${dataBR(e.criado_em)}</span> `}
         <span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span></div>
@@ -214,7 +216,7 @@ async function telaResumo() {
   const hoje = HOJE();
   const iniHoje = isoDeBrasilia(hoje, "00:00");
   const fim7 = isoDeBrasilia(somaDias(hoje, 7), "23:59");
-  const [ev, hon, par, docs, pubs, fil, movn, ale] = await Promise.all([
+  const [ev, hon, par, docs, pubs, fil, movn, ale, pa] = await Promise.all([
     db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", iniHoje).lte("data_hora", fim7).order("data_hora", { ascending: true }),
     db.from("honorarios").select("*"),
     db.from("parcelas").select("*").order("vencimento", { ascending: true }),
@@ -223,7 +225,9 @@ async function telaResumo() {
     db.from("fila").select("id,prazo,prazo_ajuizar").neq("etapa", "ajuizado"),
     db.from("movimentos").select("processo_id").eq("lida", false).limit(5000),
     db.from("atendimento_alertas").select("*").is("resolvido_em", null).order("criado_em", { ascending: false }).limit(30),
+    db.from("eventos").select("*").in("tipo", ["pericia", "audiencia"]).gte("data_hora", iniHoje).order("data_hora", { ascending: true }).limit(40),
   ]);
+  const periciasAud = pa.error ? [] : pa.data;
   const alertasAt = ale.error ? [] : ale.data;
   const naFila = fil.error ? [] : fil.data;
   const filaPrazo = naFila.filter((x) => (x.prazo && x.prazo <= somaDias(hoje, 15)) || (x.prazo_ajuizar && x.prazo_ajuizar <= somaDias(hoje, 2))).length;
@@ -273,6 +277,7 @@ async function telaResumo() {
       <a class="card-num" href="#clientes" data-filtro="docs"><div class="n">${Object.keys(docsPend).length}</div><div class="l">clientes com documentos pendentes</div></a>
       <a class="card-num" href="#clientes"><div class="n">${ativos.length}</div><div class="l">clientes ativos</div></a>
     </div>
+    ${blocoPericiasAudiencias(periciasAud)}
     ${alertasAt.length ? `<div class="bloco" id="bloco-alertas"><h2 style="margin-bottom:10px">Atendimento online: pedidos de retorno</h2><div class="lista">${alertasAt.map((a) => {
       const c = a.cliente_id && S.cli[a.cliente_id];
       const fone = String(a.contato || c?.whatsapp || "").replace(/\D/g, "");
@@ -308,7 +313,154 @@ async function telaResumo() {
     const r = await db.from("atendimento_alertas").update({ resolvido_em: new Date().toISOString(), resolvido_por: S.advogado.email }).eq("id", b.dataset.resolver);
     if (r.error) return toast(r.error.message, true); telaResumo();
   }));
-  ligarEventos(app, ev.data, telaResumo);
+  ligarEventos(app, [...ev.data, ...periciasAud], telaResumo);
+  app.querySelector("#imp-eproc")?.addEventListener("click", () => dialogoImportarAgenda(telaResumo));
+}
+
+// Perícias e audiências marcadas: sempre em destaque no topo do Resumo
+function diasAte(iso) {
+  const a = new Date(HOJE() + "T12:00:00Z"), b = new Date(chaveDia(iso) + "T12:00:00Z");
+  return Math.round((b - a) / 864e5);
+}
+function blocoPericiasAudiencias(lista) {
+  const cab = `<div class="barra" style="margin-bottom:10px"><div><h2>Perícias e audiências marcadas</h2>
+      <p class="peq mudo">Todas as futuras, em ordem de data. Para trazer as que já estão no eproc, use "Importar do eproc".</p></div>
+      <button class="btn btn-sec btn-peq" id="imp-eproc">Importar do eproc</button></div>`;
+  if (!lista.length) return `<div class="bloco destaque-pa">${cab}<div class="vazio">Nenhuma perícia ou audiência futura lançada.</div></div>`;
+  return `<div class="bloco destaque-pa">${cab}<div class="pa-grade">${lista.map((e) => {
+    const p = S.proc[e.processo_id], c = p && S.cli[p.cliente_id];
+    const d = diasAte(e.data_hora), pt = partesData(e.data_hora);
+    const quando = d === 0 ? "HOJE" : d === 1 ? "AMANHÃ" : `em ${d} dias`;
+    const mes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][Number(pt.data.slice(5, 7)) - 1];
+    return `<div class="pa-card pa-${e.tipo} ${d <= 2 ? "pa-urgente" : d <= 7 ? "pa-semana" : ""}">
+      <div class="pa-data"><span class="pa-dia">${pt.data.slice(8, 10)}</span><span class="pa-mes">${mes}</span><span class="pa-hora">${horaBR(e.data_hora)}</span></div>
+      <div class="pa-info">
+        <div><span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span> <span class="pa-quando">${quando}</span></div>
+        <div class="pa-cli">${c ? `<a href="#cliente/${c.id}">${esc(c.nome)}</a>` : "Cliente não encontrado"}</div>
+        <div class="pa-tit">${esc(e.titulo)}</div>
+        <div class="sec">${p?.numero ? esc(p.numero) : esc(p?.titulo || "")}${e.local ? " · " + esc(e.local) : ""}</div>
+        <div class="pa-acoes">${statusAviso(e)} ${e.visivel_cliente ? botaoWhats(c?.whatsapp, msgEvento(e), "Lembrar o cliente") : ""}<button class="btn btn-sec btn-peq" data-editar-ev="${e.id}">Editar</button></div>
+      </div></div>`;
+  }).join("")}</div></div>`;
+}
+
+// ================= IMPORTAR PERÍCIAS E AUDIÊNCIAS DO EPROC =================
+// No eproc: Painel do advogado > Perícias (ou Audiências) > Ctrl+P > Salvar como PDF. Depois é só soltar o PDF aqui.
+function dialogoImportarAgenda(depois) {
+  abrir(`<form novalidate>
+    <h2>Importar perícias e audiências do eproc</h2>
+    <p class="peq mudo" style="margin:-8px 0 12px">No eproc, abra o <b>Painel do advogado</b>, clique em <b>Perícias</b> (ou na lista de audiências), aperte <b>Ctrl+P</b> e escolha <b>Salvar como PDF</b>. Solte o PDF aqui. Também dá para copiar a página inteira (Ctrl+A, Ctrl+C) e colar no campo abaixo. Funciona com o eproc da Justiça Federal, do TJSC e do TJPR.</p>
+    <div class="leitor"><button type="button" class="leitor-zona" id="ia-zona"><span class="leitor-ico" aria-hidden="true">⇪</span>
+      <span class="leitor-txt"><b>Soltar o PDF do eproc</b><span>Pode mandar mais de um (perícias da Justiça Federal, audiências do TJSC...).</span></span></button>
+      <input type="file" id="ia-arq" accept=".pdf" multiple hidden></div>
+    <div class="campo"><label for="ia-txt">Ou cole o texto da página</label><textarea id="ia-txt" rows="3" placeholder="Cole aqui o conteúdo copiado da página do eproc"></textarea></div>
+    <div class="leitor-status" id="ia-st" aria-live="polite"></div>
+    <div id="ia-res"></div>
+    <div class="dlg-botoes"><div class="dir"><button type="button" class="btn btn-sec" data-fechar>Fechar</button><button type="submit" class="btn btn-primario" id="ia-ok" disabled>Lançar na agenda</button></div></div>
+  </form>`, async (f) => { await lancar(f); }, true);
+  const zona = dlg.querySelector("#ia-zona"), inp = dlg.querySelector("#ia-arq"), st = dlg.querySelector("#ia-st"), res = dlg.querySelector("#ia-res"), ok = dlg.querySelector("#ia-ok");
+  let linhas = [];
+  const digitos = (x) => String(x || "").replace(/\D/g, "");
+  const tokens = (x) => norm(x).split(/\s+/).filter((w) => w.length > 2);
+  // cliente pelo nome do autor/periciado (aceita nome mais curto ou mais longo que o da ficha)
+  const clientePorNome = (nome) => {
+    const t = tokens(nome); if (t.length < 2) return null;
+    let melhor = null, nota = 0;
+    for (const c of S.clientes) {
+      const tc = tokens(c.nome); if (!tc.length || tc[0] !== t[0]) continue;
+      const comuns = t.filter((w) => tc.includes(w)).length;
+      const ok = comuns === Math.min(t.length, tc.length) && comuns >= 2;
+      if (ok && comuns > nota) { melhor = c; nota = comuns; }
+    }
+    return melhor;
+  };
+  const analisar = async (itens) => {
+    const hoje = HOJE();
+    itens = itens.filter((x) => x.data >= hoje);
+    if (!itens.length) { st.textContent = "Não encontrei perícias ou audiências futuras nesse conteúdo. Confira se é a lista do Painel do advogado."; res.innerHTML = ""; ok.disabled = true; return; }
+    const porNum = {};
+    S.processos.forEach((p) => { const d = digitos(p.numero); if (d) (porNum[d] ||= []).push(p); });
+    const ids = [...new Set(itens.flatMap((x) => (porNum[digitos(x.numero)] || []).map((p) => p.id)))];
+    const exist = ids.length ? (await db.from("eventos").select("id,processo_id,tipo,data_hora,titulo").in("processo_id", ids).in("tipo", ["pericia", "audiencia"]).gte("data_hora", isoDeBrasilia(hoje, "00:00"))).data || [] : [];
+    linhas = itens.map((x) => {
+      const quando = isoDeBrasilia(x.data, x.hora);
+      const procs = porNum[digitos(x.numero)] || [];
+      const p = procs.find((q) => !q.arquivado) || procs[0];
+      if (p) {
+        const doProc = exist.filter((e) => e.processo_id === p.id && e.tipo === x.tipo);
+        const igual = doProc.find((e) => Math.abs(new Date(e.data_hora) - new Date(quando)) < 60000);
+        if (igual) return { x, p, acao: "ja", quando };
+        if (doProc.length) return { x, p, acao: "remarcar", ev: doProc[0], quando };
+        return { x, p, acao: "lancar", quando };
+      }
+      const c = clientePorNome(x.autor);
+      return c ? { x, c, acao: "cadastrar", quando } : { x, acao: "sem_cliente", quando };
+    }).sort((a, b) => a.quando.localeCompare(b.quando));
+    const ROT = { lancar: "nova", remarcar: "data mudou: atualiza", cadastrar: "cadastra o processo", ja: "já está na agenda", sem_cliente: "sem ficha no painel" };
+    const usaveis = linhas.filter((l) => l.acao !== "ja" && l.acao !== "sem_cliente").length;
+    st.textContent = `${linhas.length} encontrada(s). ${usaveis} para lançar ou atualizar.`;
+    res.innerHTML = `<div class="leitor-tabela ia-tabela"><table><thead><tr><th><span class="sr">Lançar</span></th><th>Data</th><th>Cliente e processo</th><th>Situação</th></tr></thead><tbody>
+      ${linhas.map((l, i) => {
+        const c = l.p ? S.cli[l.p.cliente_id] : l.c;
+        const pode = l.acao !== "ja" && l.acao !== "sem_cliente";
+        return `<tr class="${l.acao === "ja" ? "igual" : ""}"><td><input type="checkbox" data-ia="${i}" ${pode ? "checked" : l.acao === "ja" ? "disabled" : ""} aria-label="Lançar"></td>
+          <td style="white-space:nowrap"><b>${dBR(l.x.data)}</b><br>${l.x.hora} <span class="tag tag-${l.x.tipo}">${NOME_TIPO[l.x.tipo]}</span></td>
+          <td><b>${esc(c ? c.nome : nomeProprio(l.x.autor) || "?")}</b><div class="sec">${esc(l.x.numero)} · ${esc(l.x.titulo)}${l.x.perito ? " · " + esc(l.x.perito) : ""}</div></td>
+          <td class="ia-sit ia-${l.acao}">${ROT[l.acao]}${l.acao === "remarcar" ? `<div class="sec">antes: ${dataBR(l.ev.data_hora)} ${horaBR(l.ev.data_hora)}</div>` : ""}${l.acao === "sem_cliente" ? '<div class="sec">marque para cadastrar o cliente, o processo e a perícia de uma vez (depois complete a ficha)</div>' : ""}</td></tr>`;
+      }).join("")}</tbody></table></div>
+      <label class="check" style="margin-top:10px"><input type="checkbox" id="ia-avisar" checked><span>Mostrar no portal do cliente e avisar por e-mail, com lembretes 7 dias e 1 dia antes <span class="mudo peq">(com as orientações de como se preparar)</span></span></label>`;
+    ok.disabled = !usaveis;
+    ok.textContent = usaveis ? `Lançar ${usaveis} na agenda` : "Lançar na agenda";
+    res.querySelectorAll("[data-ia]").forEach((cb) => (cb.onchange = () => { const n = res.querySelectorAll("[data-ia]:checked").length; ok.disabled = !n; ok.textContent = n ? `Lançar ${n} na agenda` : "Lançar na agenda"; }));
+  };
+  const lancar = async () => {
+    const marcadas = [...res.querySelectorAll("[data-ia]:checked")].map((cb) => linhas[+cb.dataset.ia]);
+    if (!marcadas.length) return toast("Marque ao menos uma.", true);
+    const avisar = dlg.querySelector("#ia-avisar").checked;
+    ok.disabled = true; let feitos = 0, erros = 0;
+    for (const l of marcadas) {
+      const x = l.x;
+      const local = [x.local, x.tipo === "pericia" && x.perito ? "Perito: " + x.perito : ""].filter(Boolean).join(" · ") || null;
+      let pid = l.p?.id;
+      if (l.acao === "sem_cliente") {
+        const rc = await db.from("clientes").insert({ nome: nomeProprio(x.autor), tipo_pessoa: "pf" }).select().single();
+        if (rc.error) { erros++; toast(rc.error.message, true); continue; }
+        l.c = rc.data; l.acao = "cadastrar";
+      }
+      if (l.acao === "cadastrar") {
+        const tit = /INSTITUTO NACIONAL DO SEGURO SOCIAL|INSS/i.test(x.reu) ? "Ação previdenciária contra o INSS" : "Processo " + x.numero;
+        const rp = await db.from("processos").insert({ cliente_id: l.c.id, titulo: tit, numero: x.numero, parte_contraria: x.reu ? nomeProprio(x.reu) : null, juizo: x.unidade ? nomeProprio(x.unidade) : null }).select().single();
+        if (rp.error) { erros++; toast(rp.error.message, true); continue; }
+        pid = rp.data.id;
+      }
+      const r = l.acao === "remarcar"
+        ? await db.from("eventos").update({ data_hora: l.quando, local, titulo: x.titulo }).eq("id", l.ev.id)
+        : await db.from("eventos").insert({ processo_id: pid, tipo: x.tipo, titulo: x.titulo, data_hora: l.quando, local, link: x.link || null,
+            descricao: orientacaoCliente(x), visivel_cliente: avisar, notificar: avisar });
+      if (r.error) { erros++; toast(r.error.message, true); } else feitos++;
+    }
+    dlg.close();
+    toast(`${feitos} perícia(s)/audiência(s) lançada(s) na agenda${erros ? `, ${erros} com erro` : ""}.${avisar && feitos ? " Os avisos aos clientes saem em alguns minutos (entre 7h e 20h)." : ""}`);
+    await recarregarBase(); (depois || rotear)();
+  };
+  const lerTexto = async (texto) => { await analisar(lerAgendaEproc(texto)); };
+  const lerPdfs = async (arqs) => {
+    arqs = [...arqs].filter((a) => /pdf$/i.test(a.name) || a.type === "application/pdf");
+    if (!arqs.length) return toast("Envie o PDF salvo do eproc.", true);
+    st.textContent = "Lendo o PDF...";
+    try {
+      const { lerArquivos } = await import("./leitor-docs.js");
+      const lidos = await lerArquivos(arqs, (m) => (st.textContent = m));
+      const erro = lidos.find((x) => x.erro); if (erro) st.textContent = erro.nome + ": " + erro.erro;
+      await lerTexto(lidos.map((x) => x.texto || "").join("\n\f\n"));
+    } catch (e) { st.textContent = "Não foi possível ler o PDF: " + (e.message || e); }
+  };
+  zona.onclick = () => inp.click();
+  inp.onchange = () => { lerPdfs(inp.files); inp.value = ""; };
+  ["dragenter", "dragover"].forEach((ev) => zona.addEventListener(ev, (e) => { e.preventDefault(); zona.classList.add("sobre"); }));
+  ["dragleave", "drop"].forEach((ev) => zona.addEventListener(ev, () => zona.classList.remove("sobre")));
+  zona.addEventListener("drop", (e) => { e.preventDefault(); lerPdfs(e.dataTransfer.files); });
+  dlg.querySelector("#ia-txt").addEventListener("input", (e) => { if (e.target.value.trim().length > 40) lerTexto(e.target.value); });
 }
 
 async function marcarPago(id) {
@@ -332,8 +484,8 @@ async function telaAgenda() {
   const hojeK = HOJE(), amanhaK = somaDias(hojeK, 1);
   app.innerHTML = `
   <div class="wrap painel-corpo">
-    <div class="barra"><div><h1>Agenda</h1><p class="mudo peq">Próximos 90 dias, de todos os clientes.</p></div>
-      <button class="btn btn-primario" id="novo-ev">+ Lançar evento</button></div>
+    <div class="barra"><div><h1>Agenda</h1><p class="mudo peq">Próximos 90 dias, de todos os clientes. Perícias e audiências ficam em destaque.</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="imp-eproc">Importar do eproc</button><button class="btn btn-primario" id="novo-ev">+ Lançar evento</button></div></div>
     ${Object.keys(grupos).length ? Object.entries(grupos).map(([k, evs]) => `
       <div class="grupo-data">${k === hojeK ? "Hoje · " : k === amanhaK ? "Amanhã · " : ""}${esc(dataLonga(evs[0].data_hora))}</div>
       <div class="lista">${evs.map((e) => itemEvento(e)).join("")}</div>`).join("") : `<div class="vazio">Nenhum compromisso nos próximos 90 dias.</div>`}
@@ -341,6 +493,7 @@ async function telaAgenda() {
     ${and.data.length ? `<div class="lista">${and.data.map((e) => itemEvento(e)).join("")}</div>` : `<div class="vazio">Nenhum andamento lançado nesta semana.</div>`}
   </div>`;
   app.querySelector("#novo-ev").onclick = () => dialogoEvento({ escolherProcesso: true, depois: telaAgenda });
+  app.querySelector("#imp-eproc").onclick = () => dialogoImportarAgenda(telaAgenda);
   ligarEventos(app, [...fut.data, ...and.data], telaAgenda);
 }
 
@@ -500,12 +653,13 @@ async function telaCliente(id) {
           <div class="barra"><h2>Processos</h2><button class="btn btn-primario btn-peq" id="novo-proc">+ Novo processo</button></div>
           ${procs.length ? procs.map((p) => {
             const pe = evs.filter((e) => e.processo_id === p.id).sort(ordenaEv);
+            const prox = pe.filter((e) => (e.tipo === "pericia" || e.tipo === "audiencia") && e.data_hora && chaveDia(e.data_hora) >= hoje).sort((a, b) => a.data_hora.localeCompare(b.data_hora))[0];
             return `
             <div class="proc-admin ${p.arquivado ? "inativo" : ""}">
               <div class="cab">
                 <div><div style="margin-bottom:4px">${tagArea(p.area) || '<span class="tag tag-oculto">sem área</span>'}</div><h3>${esc(p.titulo)}${p.arquivado ? ' <span class="tag tag-oculto">encerrado</span>' : ""}</h3>
                   <div class="sec peq mudo">${[p.numero && "nº " + esc(p.numero), p.juizo && esc(p.juizo), p.parte_contraria && "x " + esc(p.parte_contraria)].filter(Boolean).join(" · ") || "sem número"}</div>
-                  <span class="situacao">${esc(p.situacao)}</span>${p.ultima_mov_em ? `<div class="peq" style="margin-top:6px"><span class="mudo">Tribunal, ${dataBR(p.ultima_mov_em)}:</span> ${esc(p.ultima_mov || "")}</div>` : ""}${p.valor_causa ? ` <span class="peq mudo">· valor da causa ${moeda(p.valor_causa)}</span>` : ""}</div>
+                  <span class="situacao">${esc(p.situacao)}</span>${prox ? ` <span class="selo-pa selo-${prox.tipo}">${NOME_TIPO[prox.tipo]} ${dataBR(prox.data_hora).slice(0, 5)} às ${horaBR(prox.data_hora)}</span>` : ""}${p.ultima_mov_em ? `<div class="peq" style="margin-top:6px"><span class="mudo">Tribunal, ${dataBR(p.ultima_mov_em)}:</span> ${esc(p.ultima_mov || "")}</div>` : ""}${p.valor_causa ? ` <span class="peq mudo">· valor da causa ${moeda(p.valor_causa)}</span>` : ""}</div>
                 <div class="dir" style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start">
                   <button class="btn btn-primario btn-peq" data-novo-ev="${p.id}">+ Evento</button>
                   <button class="btn btn-sec btn-peq" data-calc-proc="${p.id}">Calcular</button>
