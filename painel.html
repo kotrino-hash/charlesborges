@@ -225,7 +225,7 @@ async function telaResumo() {
     db.from("fila").select("id,prazo,prazo_ajuizar").neq("etapa", "ajuizado"),
     db.from("movimentos").select("processo_id").eq("lida", false).limit(5000),
     db.from("atendimento_alertas").select("*").is("resolvido_em", null).order("criado_em", { ascending: false }).limit(30),
-    db.from("eventos").select("*").in("tipo", ["pericia", "audiencia"]).gte("data_hora", iniHoje).order("data_hora", { ascending: true }).limit(40),
+    db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", iniHoje).order("data_hora", { ascending: true }).limit(6),
   ]);
   const periciasAud = pa.error ? [] : pa.data;
   const alertasAt = ale.error ? [] : ale.data;
@@ -277,7 +277,6 @@ async function telaResumo() {
       <a class="card-num" href="#clientes" data-filtro="docs"><div class="n">${Object.keys(docsPend).length}</div><div class="l">clientes com documentos pendentes</div></a>
       <a class="card-num" href="#clientes"><div class="n">${ativos.length}</div><div class="l">clientes ativos</div></a>
     </div>
-    ${blocoPericiasAudiencias(periciasAud)}
     ${alertasAt.length ? `<div class="bloco" id="bloco-alertas"><h2 style="margin-bottom:10px">Atendimento online: pedidos de retorno</h2><div class="lista">${alertasAt.map((a) => {
       const c = a.cliente_id && S.cli[a.cliente_id];
       const fone = String(a.contato || c?.whatsapp || "").replace(/\D/g, "");
@@ -289,8 +288,7 @@ async function telaResumo() {
     }).join("")}</div></div>` : ""}
     <div class="colunas">
       <div>
-        <div class="bloco"><h2 style="margin-bottom:10px">Próximos 7 dias</h2>
-          ${ev.data.length ? `<div class="lista">${ev.data.map((e) => itemEvento(e)).join("")}</div>` : `<div class="vazio">Nada marcado para os próximos 7 dias.</div>`}</div>
+        ${blocoProximos(periciasAud)}
         ${linhasArea.length ? `<div class="bloco"><h2 style="margin-bottom:10px">Processos por área</h2><div class="lista">${linhasArea.map(([k, v]) => `
           <a class="item clicavel" style="text-decoration:none;color:inherit" href="#clientes" data-filtro="area:${k}"><div class="principal">${tagArea(k) || '<span class="tag tag-oculto">sem área</span>'}</div>
             <div class="dir peq mudo">${v.proc} processo${v.proc === 1 ? "" : "s"} · ${v.cli.size} cliente${v.cli.size === 1 ? "" : "s"}</div></a>`).join("")}</div></div>` : ""}
@@ -318,30 +316,19 @@ async function telaResumo() {
 }
 
 // Perícias e audiências marcadas: sempre em destaque no topo do Resumo
-function diasAte(iso) {
-  const a = new Date(HOJE() + "T12:00:00Z"), b = new Date(chaveDia(iso) + "T12:00:00Z");
-  return Math.round((b - a) / 864e5);
-}
-function blocoPericiasAudiencias(lista) {
-  const cab = `<div class="barra" style="margin-bottom:10px"><div><h2>Perícias e audiências marcadas</h2>
-      <p class="peq mudo">Todas as futuras, em ordem de data. Para trazer as que já estão no eproc, use "Importar do eproc".</p></div>
-      <button class="btn btn-sec btn-peq" id="imp-eproc">Importar do eproc</button></div>`;
-  if (!lista.length) return `<div class="bloco destaque-pa">${cab}<div class="vazio">Nenhuma perícia ou audiência futura lançada.</div></div>`;
-  return `<div class="bloco destaque-pa">${cab}<div class="pa-grade">${lista.map((e) => {
-    const p = S.proc[e.processo_id], c = p && S.cli[p.cliente_id];
-    const d = diasAte(e.data_hora), pt = partesData(e.data_hora);
-    const quando = d === 0 ? "HOJE" : d === 1 ? "AMANHÃ" : `em ${d} dias`;
-    const mes = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][Number(pt.data.slice(5, 7)) - 1];
-    return `<div class="pa-card pa-${e.tipo} ${d <= 2 ? "pa-urgente" : d <= 7 ? "pa-semana" : ""}">
-      <div class="pa-data"><span class="pa-dia">${pt.data.slice(8, 10)}</span><span class="pa-mes">${mes}</span><span class="pa-hora">${horaBR(e.data_hora)}</span></div>
-      <div class="pa-info">
-        <div><span class="tag tag-${e.tipo}">${NOME_TIPO[e.tipo]}</span> <span class="pa-quando">${quando}</span></div>
-        <div class="pa-cli">${c ? `<a href="#cliente/${c.id}">${esc(c.nome)}</a>` : "Cliente não encontrado"}</div>
-        <div class="pa-tit">${esc(e.titulo)}</div>
-        <div class="sec">${p?.numero ? esc(p.numero) : esc(p?.titulo || "")}${e.local ? " · " + esc(e.local) : ""}</div>
-        <div class="pa-acoes">${statusAviso(e)} ${e.visivel_cliente ? botaoWhats(c?.whatsapp, msgEvento(e), "Lembrar o cliente") : ""}<button class="btn btn-sec btn-peq" data-editar-ev="${e.id}">Editar</button></div>
-      </div></div>`;
-  }).join("")}</div></div>`;
+function blocoProximos(lista) {
+  const mesCurto = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  return `<div class="bloco prox">
+    <div class="prox-cab"><h2>Próximos compromissos</h2><div style="display:flex;gap:12px;align-items:center"><button type="button" class="link-btn" id="imp-eproc">Importar do eproc</button><a href="#agenda">Ver agenda completa →</a></div></div>
+    ${lista.length ? lista.map((e) => {
+      const p = S.proc[e.processo_id], c = p && S.cli[p.cliente_id];
+      const k = chaveDia(e.data_hora), q = quandoRel(k), cor = COR_TIPO[e.tipo] || "reu";
+      return `<div class="prox-l"><div class="prox-dt"><b>${k.slice(8, 10)}</b><span>${mesCurto[Number(k.slice(5, 7)) - 1]}</span></div>
+        <div style="min-width:0"><div class="ag-t"><span class="ag-tipo tp-${cor}">${NOME_TIPO[e.tipo]}</span>${esc(e.titulo)}</div>
+          <div class="ag-meta">${e.tipo === "prazo" && partesData(e.data_hora).hora === "18:00" ? "até 18h" : partesData(e.data_hora).hora}${c ? ` · <a href="#cliente/${c.id}">${esc(c.nome)}</a>` : ""}${e.local ? " · " + esc(e.local) : ""}</div></div>
+        <div class="prox-q ${q.urg ? "urg" : ""}">${q.txt}</div></div>`;
+    }).join("") : '<div class="vazio" style="border:0">Nenhum compromisso futuro lançado.</div>'}
+  </div>`;
 }
 
 // ================= IMPORTAR PERÍCIAS E AUDIÊNCIAS DO EPROC =================
@@ -469,32 +456,140 @@ async function marcarPago(id) {
 }
 
 // ================= AGENDA =================
+// Calendário do mês + lista por dia. Visões: Dia, Semana, Mês e Lista (próximos compromissos).
+const COR_TIPO = { pericia: "per", audiencia: "aud", prazo: "pra", reuniao: "reu" };
+const PLURAL_TIPO = { pericia: "Perícias", audiencia: "Audiências", prazo: "Prazos", reuniao: "Reuniões" };
+const MESES_AG = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const SEMANA_AG = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+const diaSemana = (k) => new Date(k + "T12:00:00Z").getUTCDay();
+function tituloDia(k) {
+  const d = diaSemana(k), dd = Number(k.slice(8, 10)), mm = Number(k.slice(5, 7)) - 1;
+  const nome = SEMANA_AG[d].charAt(0).toUpperCase() + SEMANA_AG[d].slice(1);
+  return `${nome}, ${dd} de ${MESES_AG[mm]}${k.slice(0, 4) !== HOJE().slice(0, 4) ? " de " + k.slice(0, 4) : ""}`;
+}
+function quandoRel(k) {
+  const n = Math.round((new Date(k + "T12:00:00Z") - new Date(HOJE() + "T12:00:00Z")) / 864e5);
+  if (n === 0) return { txt: "Hoje", urg: true };
+  if (n === 1) return { txt: "Amanhã", urg: true };
+  if (n < 0) return { txt: n === -1 ? "Ontem" : `há ${-n} dias`, urg: false };
+  return { txt: n < 7 ? `em ${n} dias` : n < 14 ? "Semana que vem" : `em ${n} dias`, urg: false };
+}
+function linhaAgenda(e) {
+  const p = S.proc[e.processo_id], c = p && S.cli[p.cliente_id];
+  const cor = COR_TIPO[e.tipo] || "reu";
+  const meta = [c ? `<a href="#cliente/${c.id}">${esc(c.nome)}</a>` : "", p?.numero ? esc(p.numero) : esc(p?.titulo || ""), e.local ? esc(e.local) : "", e.link ? '<span class="ag-video">videoconferência</span>' : ""].filter(Boolean).join(" · ");
+  const st = !e.visivel_cliente ? '<span class="ag-st">só interno</span>'
+    : !e.notificar ? '<span class="ag-st">sem e-mail</span>'
+    : (e.aviso_enviado_em || e.lembrete_7d_enviado_em || e.lembrete_1d_enviado_em) ? '<span class="ag-st ok">✓ cliente avisado</span>' : '<span class="ag-st">aviso agendado</span>';
+  const zap = e.visivel_cliente && c?.whatsapp ? `<a class="ag-ic ag-zap" target="_blank" rel="noopener" href="${linkWhats(c.whatsapp, msgEvento(e))}" title="Lembrar o cliente pelo WhatsApp" aria-label="Lembrar o cliente pelo WhatsApp">${ICON_WHATS}</a>` : "";
+  return `<div class="ag-ev">
+    <div class="ag-h">${e.tipo === "prazo" && partesData(e.data_hora).hora === "18:00" ? "até 18h" : partesData(e.data_hora).hora}</div>
+    <div class="ag-faixa ${cor}"></div>
+    <div class="ag-corpo"><div class="ag-t"><span class="ag-tipo tp-${cor}">${NOME_TIPO[e.tipo]}</span>${esc(e.titulo)}</div><div class="ag-meta">${meta}</div></div>
+    <div class="ag-acoes">${st}${zap}<button class="ag-ic" data-editar-ev="${e.id}" title="Editar" aria-label="Editar">✎</button></div>
+  </div>`;
+}
+function inicioSemana(k) { return somaDias(k, -diaSemana(k)); }
+
 async function telaAgenda() {
   app.innerHTML = '<div class="carregando">Carregando agenda...</div>';
-  const hoje = isoDeBrasilia(HOJE(), "00:00");
-  const ate = new Date(Date.now() + 90 * 864e5).toISOString();
+  const hoje = HOJE();
+  S.ag ||= { visao: "lista", dia: hoje, mes: hoje.slice(0, 7), filtro: "" };
+  const A = S.ag;
+  const desde = somaDias(hoje, -120), ate = somaDias(hoje, 400);
   const semanaPassada = new Date(Date.now() - 7 * 864e5).toISOString();
-  const [fut, and] = await Promise.all([
-    db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", hoje).lte("data_hora", ate).order("data_hora", { ascending: true }),
+  const [todos, and] = await Promise.all([
+    db.from("eventos").select("*").neq("tipo", "andamento").gte("data_hora", isoDeBrasilia(desde, "00:00")).lte("data_hora", isoDeBrasilia(ate, "23:59")).order("data_hora", { ascending: true }),
     db.from("eventos").select("*").eq("tipo", "andamento").gte("criado_em", semanaPassada).order("criado_em", { ascending: false }),
   ]);
-  if (fut.error || and.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc((fut.error || and.error).message)}</div></div>`);
-  const grupos = {};
-  for (const e of fut.data) (grupos[chaveDia(e.data_hora)] ||= []).push(e);
-  const hojeK = HOJE(), amanhaK = somaDias(hojeK, 1);
+  if (todos.error || and.error) return (app.innerHTML = `<div class="wrap painel-corpo"><div class="aviso aviso-erro">${esc((todos.error || and.error).message)}</div></div>`);
+  const evs = todos.data;
+  const porDia = {};
+  for (const e of evs) (porDia[chaveDia(e.data_hora)] ||= []).push(e);
+
   app.innerHTML = `
-  <div class="wrap painel-corpo">
-    <div class="barra"><div><h1>Agenda</h1><p class="mudo peq">Próximos 90 dias, de todos os clientes. Perícias e audiências ficam em destaque.</p></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sec" id="imp-eproc">Importar do eproc</button><button class="btn btn-primario" id="novo-ev">+ Lançar evento</button></div></div>
-    ${Object.keys(grupos).length ? Object.entries(grupos).map(([k, evs]) => `
-      <div class="grupo-data">${k === hojeK ? "Hoje · " : k === amanhaK ? "Amanhã · " : ""}${esc(dataLonga(evs[0].data_hora))}</div>
-      <div class="lista">${evs.map((e) => itemEvento(e)).join("")}</div>`).join("") : `<div class="vazio">Nenhum compromisso nos próximos 90 dias.</div>`}
-    <div class="grupo-data" style="margin-top:18px">Andamentos lançados nos últimos 7 dias</div>
-    ${and.data.length ? `<div class="lista">${and.data.map((e) => itemEvento(e)).join("")}</div>` : `<div class="vazio">Nenhum andamento lançado nesta semana.</div>`}
+  <div class="wrap-largo painel-corpo agenda">
+    <div class="barra"><div><h1>Agenda</h1><p class="mudo peq" id="ag-sub"></p></div>
+      <div class="ag-topo">
+        <div class="seg ag-visao" role="tablist">${[["dia", "Dia"], ["semana", "Semana"], ["mes", "Mês"], ["lista", "Próximos"]].map(([k, r]) => `<button type="button" data-visao="${k}" aria-pressed="${A.visao === k}">${r}</button>`).join("")}</div>
+        <button class="btn btn-sec" id="imp-eproc">Importar do eproc</button>
+        <button class="btn btn-primario" id="novo-ev">+ Novo compromisso</button>
+      </div></div>
+    <div class="ag-filtros" id="ag-filtros"></div>
+    <div class="ag-grade">
+      <aside class="ag-cal" id="ag-cal"></aside>
+      <section><div class="ag-nav" id="ag-nav"></div><div id="ag-lista"></div></section>
+    </div>
+    <details class="ag-andamentos"><summary>Andamentos lançados nos últimos 7 dias (${and.data.length})</summary>
+      ${and.data.length ? `<div class="lista">${and.data.map((e) => itemEvento(e)).join("")}</div>` : `<div class="vazio">Nenhum andamento lançado nesta semana.</div>`}</details>
   </div>`;
+
+  const periodo = () => {
+    if (A.visao === "dia") return [A.dia, A.dia];
+    if (A.visao === "semana") { const i = inicioSemana(A.dia); return [i, somaDias(i, 6)]; }
+    if (A.visao === "mes") { const i = A.mes + "-01"; const f = somaDias(somaDias(i, 32).slice(0, 7) + "-01", -1); return [i, f]; }
+    return [hoje, ate];
+  };
+  const desenhar = () => {
+    const [i, f] = periodo();
+    const noPeriodo = evs.filter((e) => { const k = chaveDia(e.data_hora); return k >= i && k <= f; });
+    const cont = {}; noPeriodo.forEach((e) => (cont[e.tipo] = (cont[e.tipo] || 0) + 1));
+    const visiveis = noPeriodo.filter((e) => !A.filtro || e.tipo === A.filtro);
+    // filtros
+    app.querySelector("#ag-filtros").innerHTML = `<button type="button" class="ag-chip" data-filtro="" aria-pressed="${!A.filtro}">Todos <b>${noPeriodo.length}</b></button>` +
+      ["pericia", "audiencia", "prazo", "reuniao"].map((t) => `<button type="button" class="ag-chip" data-filtro="${t}" aria-pressed="${A.filtro === t}"><i class="ag-ponto ${COR_TIPO[t]}"></i>${PLURAL_TIPO[t]} <b>${cont[t] || 0}</b></button>`).join("");
+    // subtítulo e navegação
+    const rot = A.visao === "dia" ? tituloDia(A.dia)
+      : A.visao === "semana" ? `Semana de ${Number(i.slice(8))}/${i.slice(5, 7)} a ${Number(f.slice(8))}/${f.slice(5, 7)}`
+      : A.visao === "mes" ? `${MESES_AG[Number(A.mes.slice(5)) - 1].replace(/^./, (x) => x.toUpperCase())} de ${A.mes.slice(0, 4)}` : "Próximos compromissos";
+    app.querySelector("#ag-sub").textContent = `${rot} · ${visiveis.length} compromisso${visiveis.length === 1 ? "" : "s"}`;
+    app.querySelector("#ag-nav").innerHTML = A.visao === "lista" ? "" : `<button type="button" class="ag-seta" data-nav="-1" aria-label="Anterior">‹</button><b>${rot}</b><button type="button" class="ag-seta" data-nav="1" aria-label="Próximo">›</button><button type="button" class="ag-hoje" data-nav="0">Hoje</button>`;
+    // lista por dia
+    const grupos = {};
+    for (const e of visiveis) (grupos[chaveDia(e.data_hora)] ||= []).push(e);
+    const dias = Object.keys(grupos).sort();
+    app.querySelector("#ag-lista").innerHTML = dias.length ? dias.map((k) => {
+      const q = quandoRel(k);
+      return `<div class="ag-dia ${k < hoje ? "passado" : ""}"><div class="ag-dia-tit"><b>${tituloDia(k)}</b><span class="ag-rel ${q.urg ? "urg" : ""}">${q.txt}</span></div>${grupos[k].map(linhaAgenda).join("")}</div>`;
+    }).join("") : `<div class="vazio">Nenhum compromisso ${A.visao === "dia" ? "neste dia" : A.visao === "semana" ? "nesta semana" : A.visao === "mes" ? "neste mês" : "futuro"}${A.filtro ? " com esse filtro" : ""}.</div>`;
+    // calendário do mês
+    const m0 = A.mes + "-01", ini = inicioSemana(m0);
+    const celulas = Array.from({ length: 42 }, (_, n) => somaDias(ini, n));
+    const ultimaLinha = celulas.slice(35).every((k) => k.slice(0, 7) !== A.mes) ? 35 : 42;
+    const totMes = {}; evs.filter((e) => chaveDia(e.data_hora).slice(0, 7) === A.mes).forEach((e) => (totMes[e.tipo] = (totMes[e.tipo] || 0) + 1));
+    app.querySelector("#ag-cal").innerHTML = `
+      <div class="ag-cal-cab"><button type="button" class="ag-seta" data-mes="-1" aria-label="Mês anterior">‹</button><b>${MESES_AG[Number(A.mes.slice(5)) - 1].replace(/^./, (x) => x.toUpperCase())} ${A.mes.slice(0, 4)}</b><button type="button" class="ag-seta" data-mes="1" aria-label="Próximo mês">›</button></div>
+      <div class="ag-dias">${["D", "S", "T", "Q", "Q", "S", "S"].map((x) => `<div class="ag-sem">${x}</div>`).join("")}
+        ${celulas.slice(0, ultimaLinha).map((k) => {
+          const l = (porDia[k] || []).filter((e) => !A.filtro || e.tipo === A.filtro);
+          const tipos = [...new Set(l.map((e) => COR_TIPO[e.tipo] || "reu"))].slice(0, 3);
+          const cls = [k.slice(0, 7) !== A.mes && "fora", k === hoje && "hoje", A.visao === "dia" && k === A.dia && "sel", l.length && "tem"].filter(Boolean).join(" ");
+          return `<button type="button" class="ag-d ${cls}" data-dia="${k}" aria-label="${tituloDia(k)}${l.length ? ", " + l.length + " compromisso(s)" : ""}">${Number(k.slice(8))}${tipos.length ? `<span class="ag-ps">${tipos.map((t) => `<i class="${t}"></i>`).join("")}</span>` : ""}</button>`;
+        }).join("")}</div>
+      <div class="ag-cal-tot">${["pericia", "audiencia", "prazo", "reuniao"].map((t) => `<div><span><i class="ag-ponto ${COR_TIPO[t]}"></i> ${PLURAL_TIPO[t]} no mês</span><b>${totMes[t] || 0}</b></div>`).join("")}</div>`;
+    app.querySelectorAll("[data-visao]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.visao === A.visao)));
+    ligarEventos(app.querySelector("#ag-lista"), evs, telaAgenda);
+  };
+  app.querySelector(".agenda").addEventListener("click", (ev) => {
+    const t = ev.target.closest("[data-visao],[data-filtro],[data-nav],[data-mes],[data-dia]");
+    if (!t) return;
+    if (t.dataset.visao) { A.visao = t.dataset.visao; if (A.visao !== "lista") A.mes = A.dia.slice(0, 7); }
+    else if (t.dataset.filtro !== undefined) A.filtro = t.dataset.filtro;
+    else if (t.dataset.nav !== undefined) {
+      const n = Number(t.dataset.nav);
+      if (n === 0) A.dia = hoje;
+      else if (A.visao === "dia") A.dia = somaDias(A.dia, n);
+      else if (A.visao === "semana") A.dia = somaDias(A.dia, 7 * n);
+      else if (A.visao === "mes") { const x = new Date(A.mes + "-15T12:00:00Z"); x.setUTCMonth(x.getUTCMonth() + n); A.mes = x.toISOString().slice(0, 7); A.dia = A.mes + "-01"; }
+      if (A.visao !== "mes") A.mes = A.dia.slice(0, 7);
+    } else if (t.dataset.mes) { const x = new Date(A.mes + "-15T12:00:00Z"); x.setUTCMonth(x.getUTCMonth() + Number(t.dataset.mes)); A.mes = x.toISOString().slice(0, 7); if (A.visao === "mes") A.dia = A.mes + "-01"; }
+    else if (t.dataset.dia) { A.dia = t.dataset.dia; A.visao = "dia"; A.mes = A.dia.slice(0, 7); }
+    desenhar();
+  });
   app.querySelector("#novo-ev").onclick = () => dialogoEvento({ escolherProcesso: true, depois: telaAgenda });
   app.querySelector("#imp-eproc").onclick = () => dialogoImportarAgenda(telaAgenda);
-  ligarEventos(app, [...fut.data, ...and.data], telaAgenda);
+  ligarEventos(app.querySelector(".ag-andamentos"), and.data, telaAgenda);
+  desenhar();
 }
 
 // ================= CLIENTES =================
