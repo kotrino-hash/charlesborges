@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /painel.html
+
+Sitemap: https://charlesborges.adv.br/sitemap.xml

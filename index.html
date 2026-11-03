@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Charles Borges Advocacia | Anchieta/SC</title>
+<title>Advogado em Anchieta/SC | Charles Borges Advocacia</title>
 <meta name="description" content="Charles dos Santos Borges, advogado (OAB/SC 77.242). Escritório em Anchieta/SC com atendimento presencial e online em direito de família, previdenciário, bancário, consumidor, civil, trabalhista e criminal.">
 <link rel="canonical" href="https://charlesborges.adv.br/">
 <link rel="icon" type="image/png" href="favicon.png">
@@ -36,7 +36,10 @@
     "addressCountry": "BR"
   },
   "areaServed": ["Anchieta", "Campo Erê", "São Miguel do Oeste", "Chapecó", "Santa Catarina", "Paraná"],
-  "sameAs": ["https://www.instagram.com/advcharlesborges/"]
+  "sameAs": ["https://www.instagram.com/advcharlesborges/"],
+  "description": "Escritório de advocacia em Anchieta/SC, com atuação em direito previdenciário, família e sucessões, bancário, consumidor, civil e imobiliário, trabalhista e criminal.",
+  "founder": {"@type": "Person", "name": "Charles dos Santos Borges", "jobTitle": "Advogado, OAB/SC 77.242 e OAB/PR 136.810"},
+  "knowsAbout": ["Direito previdenciário", "Direito de família e sucessões", "Direito bancário", "Direito do consumidor", "Direito civil e imobiliário", "Direito do trabalho", "Direito penal"]
 }
 </script>
 <style>
@@ -93,8 +96,9 @@ nav .btn{padding:10px 18px;font-size:.9rem}
 .hero{background:linear-gradient(180deg,var(--ivory),#EEE8DC);overflow:hidden;border-bottom:1px solid var(--line)}
 .hero .wrap{display:grid;grid-template-columns:1.15fr .85fr;align-items:end;gap:40px;min-height:600px}
 .hero-text{padding:84px 0 96px}
-.hero h1{font-size:clamp(2.3rem,5vw,3.7rem);margin:18px 0 22px}
-.hero h1 em{font-style:italic;font-weight:500;color:var(--bronze-ink)}
+.hero .slogan{font-family:var(--serif);font-weight:600;color:var(--navy);line-height:1.15;letter-spacing:-.005em;font-size:clamp(2.3rem,5vw,3.7rem);margin:18px 0 22px}
+.hero .slogan em{font-style:italic;font-weight:500;color:var(--bronze-ink)}
+.hero h1.kicker{font-family:var(--caps);font-size:.78rem;letter-spacing:.22em;line-height:1.5;margin:0;color:var(--bronze-ink)}
 .hero p{font-size:1.1rem;color:var(--muted);margin-bottom:34px}
 .cta{display:flex;flex-wrap:wrap;gap:14px}
 .hero-photo{position:relative;align-self:end;justify-self:center;width:100%;max-width:400px}
@@ -112,6 +116,11 @@ nav .btn{padding:10px 18px;font-size:.9rem}
 .card:hover{background:#fff}
 .card .num{font-family:var(--caps);font-size:.8rem;color:var(--bronze);letter-spacing:.14em;display:block;margin-bottom:14px}
 .card p{font-size:.97rem;color:var(--muted)}
+.card-link{display:block;text-decoration:none;color:inherit}
+.card-link .saiba{display:inline-block;margin-top:14px;font-size:.9rem;font-weight:600;color:var(--bronze-ink)}
+.card-link:hover h3{color:var(--bronze-ink)}
+.foot-areas{margin-top:14px;font-size:.86rem}
+.foot-areas a{color:#C9D2DD}
 .card-cta{grid-column:span 2;background:var(--navy);text-decoration:none;display:flex;flex-direction:column;justify-content:center}
 .card-cta:hover{background:var(--navy-deep)}
 .card-cta h3{color:#fff}.card-cta p{color:#C3CCD7}.card-cta .num{color:#C9AE8E}
@@ -225,8 +234,8 @@ footer a{color:#DCE2EA}
 <section class="hero" id="inicio">
   <div class="wrap">
     <div class="hero-text">
-      <span class="kicker">Advocacia em Anchieta/SC</span>
-      <h1>A justiça também se faz <em>pelo consenso.</em></h1>
+      <h1 class="kicker hero-kicker">Advogado em Anchieta/SC</h1>
+      <p class="slogan">A justiça também se faz <em>pelo consenso.</em></p>
       <p>Assessoria jurídica para pessoas, famílias, produtores rurais e empresas do Oeste catarinense e do Sudoeste do Paraná, com atendimento presencial no escritório e online.</p>
       <div class="cta">
         <a class="btn btn-primary" href="https://wa.me/5549998214100" target="_blank" rel="noopener">
@@ -255,13 +264,13 @@ footer a{color:#DCE2EA}
       <p>O escritório atua na via consensual e na judicial, conforme o que cada situação exige.</p>
     </div>
     <div class="grid">
-      <article class="card"><span class="num">01</span><h3>Família e Sucessões</h3><p>Divórcio, dissolução de união estável, guarda, convivência, alimentos, inventário e arrolamento de bens.</p></article>
-      <article class="card"><span class="num">02</span><h3>Previdenciário</h3><p>Aposentadorias, benefícios por incapacidade e demandas do segurado especial rural, na via administrativa e judicial.</p></article>
-      <article class="card"><span class="num">03</span><h3>Bancário</h3><p>Revisão de contratos de crédito, defesa em execuções bancárias, embargos e renegociação de dívidas.</p></article>
-      <article class="card"><span class="num">04</span><h3>Consumidor</h3><p>Produtos com defeito, cobranças indevidas, empréstimos consignados não reconhecidos e falhas na prestação de serviços.</p></article>
-      <article class="card"><span class="num">05</span><h3>Civil e Imobiliário</h3><p>Contratos, cobranças, indenizações por acidentes, questões de posse e propriedade, usucapião e regularização de imóveis.</p></article>
-      <article class="card"><span class="num">06</span><h3>Trabalhista</h3><p>Assessoria a empregados e empregadores em reclamatórias, acordos e execuções perante a Justiça do Trabalho.</p></article>
-      <article class="card"><span class="num">07</span><h3>Criminal</h3><p>Defesa em inquéritos policiais e ações penais, queixas-crime e acompanhamento em todas as fases do processo.</p></article>
+      <a class="card card-link" href="advogado-familia.html"><span class="num">01</span><h3>Família e Sucessões</h3><p>Divórcio, dissolução de união estável, guarda, convivência, alimentos, inventário e arrolamento de bens.</p><span class="saiba">Saiba mais &rarr;</span></a>
+      <a class="card card-link" href="advogado-previdenciario.html"><span class="num">02</span><h3>Previdenciário</h3><p>Aposentadorias, benefícios por incapacidade e demandas do segurado especial rural, na via administrativa e judicial.</p><span class="saiba">Saiba mais &rarr;</span></a>
+      <a class="card card-link" href="advogado-bancario.html"><span class="num">03</span><h3>Bancário</h3><p>Revisão de contratos de crédito, defesa em execuções bancárias, embargos e renegociação de dívidas.</p><span class="saiba">Saiba mais &rarr;</span></a>
+      <a class="card card-link" href="advogado-consumidor.html"><span class="num">04</span><h3>Consumidor</h3><p>Produtos com defeito, cobranças indevidas, empréstimos consignados não reconhecidos e falhas na prestação de serviços.</p><span class="saiba">Saiba mais &rarr;</span></a>
+      <a class="card card-link" href="advogado-civil-imobiliario.html"><span class="num">05</span><h3>Civil e Imobiliário</h3><p>Contratos, cobranças, indenizações por acidentes, questões de posse e propriedade, usucapião e regularização de imóveis.</p><span class="saiba">Saiba mais &rarr;</span></a>
+      <a class="card card-link" href="advogado-trabalhista.html"><span class="num">06</span><h3>Trabalhista</h3><p>Assessoria a empregados e empregadores em reclamatórias, acordos e execuções perante a Justiça do Trabalho.</p><span class="saiba">Saiba mais &rarr;</span></a>
+      <a class="card card-link" href="advogado-criminal.html"><span class="num">07</span><h3>Criminal</h3><p>Defesa em inquéritos policiais e ações penais, queixas-crime e acompanhamento em todas as fases do processo.</p><span class="saiba">Saiba mais &rarr;</span></a>
       <a class="card card-cta" href="https://wa.me/5549998214100" target="_blank" rel="noopener"><span class="num">Outras questões</span><h3>Sua situação não está na lista?</h3><p>Descreva o caso pelo WhatsApp. Se não for da área de atuação do escritório, você será informado desde o primeiro contato.</p><span class="arrow">Enviar mensagem &rarr;</span></a>
     </div>
   </div>
@@ -350,6 +359,7 @@ footer a{color:#DCE2EA}
     <div>
       <a href="mailto:portalcharles@gmail.com">portalcharles@gmail.com</a> · WhatsApp <a href="https://wa.me/5549998214100" target="_blank" rel="noopener">(49) 99821-4100</a> · <a href="https://www.instagram.com/advcharlesborges/" target="_blank" rel="noopener">Instagram</a> · <a href="#consultar">Consultar processo</a> · <a href="cliente.html">Área do cliente</a>
     </div>
+    <p class="foot-areas">Áreas: <a href="advogado-previdenciario.html">Previdenciário</a> · <a href="advogado-familia.html">Família e Sucessões</a> · <a href="advogado-bancario.html">Bancário</a> · <a href="advogado-consumidor.html">Consumidor</a> · <a href="advogado-civil-imobiliario.html">Civil e Imobiliário</a> · <a href="advogado-trabalhista.html">Trabalhista</a> · <a href="advogado-criminal.html">Criminal</a></p>
     <p class="legal">Charles dos Santos Borges, advogado, OAB/SC 77.242 e OAB/PR 136.810. Conteúdo de caráter exclusivamente informativo, em conformidade com o Código de Ética e Disciplina da OAB e o Provimento n. 205/2021 do Conselho Federal da OAB. © <span id="ano">2026</span></p>
   </div>
 </footer>
